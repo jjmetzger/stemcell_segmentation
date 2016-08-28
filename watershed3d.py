@@ -15,10 +15,10 @@ import numpy as np
 import skimage.io as io
 import matplotlib.pylab as plt
 import pandas as pd
+from matplotlib.pyplot import rcParams
 
 io.use_plugin('tifffile')
 sys.path.append('/Users/jakob/Documents/RU/Code/segment')
-
 
 class Ws3d(object):
     """
@@ -49,6 +49,8 @@ class Ws3d(object):
         self.probability_map = None
         self.ws = None
         self.df = None
+        self.good_nuclei = None
+        self.channels = {}
         self.probability_map_filename = re.sub('\.tif$', '_Probabilities.h5', self.filename, re.IGNORECASE)
         if not os.path.isfile(self.probability_map_filename):
             print('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik classification?')
@@ -220,14 +222,33 @@ class Ws3d(object):
             self.ws = skimage.morphology.watershed(self.image_stack, markers, mask=self.mask)
 
             # make a dataframe with some of the regionprops in it
-            rp = skimage.measure.regionprops(self.ws, intensity_image=self.image_stack)
-            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
-            rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-            indices = [i1.label for i1 in rp]
-            indices = pd.Index(indices, name='cell_id')
-            self.df = pd.DataFrame(rpd, index=indices, columns=columns)
+            # rp = skimage.measure.regionprops(self.ws, intensity_image=self.image_stack)
+            # columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
+            # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            # indices = [i1.label for i1 in rp]
+            # indices = pd.Index(indices, name='cell_id')
+            # self.df = pd.DataFrame(rpd, index=indices, columns=columns)
+            self.df = self._regionprops_to_dataframe(self.ws, self.image_stack)
 
             print('segmentation done, found', self.peaks.shape[0], 'cells')
+
+    @staticmethod
+    def _regionprops_to_dataframe(ws, image_stack):
+        """
+        Return pd.DataFrame with relevant entries from watershed image. Keep static so can use it for other images as
+        well.
+
+        :param ws: watershed array
+        :param image_stack: image array
+        :return: pd.DataFrame with entries ('area', 'total_intensity', 'mean_intensity', 'centroid') and index 'cell_id'
+        """
+
+        rp = skimage.measure.regionprops(ws, intensity_image=image_stack)
+        columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
+        rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+        indices = [i1.label for i1 in rp]
+        indices = pd.Index(indices, name='cell_id')
+        return pd.DataFrame(rpd, index=indices, columns=columns)
 
     def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130):
         """
@@ -247,6 +268,7 @@ class Ws3d(object):
         # self.grid_plot(self.image_stack,  z=z, contrast_stretch=contrast_stretch, figsize=figsize)
         _, ax = plt.subplots(1,2,figsize=figsize)
 
+        # show seeds on the original image
         if z is None:
             # plot the maximum intensity projection
             mip = self.image_stack.max(axis=0)
@@ -262,6 +284,7 @@ class Ws3d(object):
         ax[0].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
         ax[0].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
+        # show watershed. Do it on the dataframe since may have deleted cells
         if z is None:
             ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
         else:
@@ -270,7 +293,7 @@ class Ws3d(object):
         ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
         ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
-    def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=True):
+    def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=True, z=None, seed=130):
         """
         Select nuclei based on their size. Use quantiles or a hard cutoff. Cutoff overrides quantiles.
 
@@ -280,18 +303,20 @@ class Ws3d(object):
         """
 
         assert self.df is not None
-        df_before = self.df
+        # df_before = self.df
 
         if cutoff is not None:
             if len(cutoff) != 2:
                 print("ERROR, len(cutoff) must be 2 (lower and upper cutoff).")
                 return
             else:
-                self.df = self.df[(self.df.area > cutoff[0]) & (self.df.area < cutoff[1])]
+                self.good_nuclei = (self.df.area > cutoff[0]) & (self.df.area < cutoff[1])
+                # self.df = self.df[(self.df.area > cutoff[0]) & (self.df.area < cutoff[1])]
 
         else:
             lims = [self.df.area.quantile(quantiles[0]), self.df.area.quantile(quantiles[1])]
-            self.df = self.df[(self.df.area > lims[0]) & (self.df.area < lims[1])]
+            self.good_nuclei = (self.df.area > lims[0]) & (self.df.area < lims[1])
+            # self.df = self.df[(self.df.area > lims[0]) & (self.df.area < lims[1])]
 
         if plot:
             # _, ax = plt.subplots()
@@ -304,14 +329,43 @@ class Ws3d(object):
             # ax.bar(a_bins[:-1], a_heights, width=width, facecolor='cornflowerblue')
             # ax.bar(b_bins[:-1] + width, b_heights, width=width, facecolor='seagreen')
 
-            df_before.hist(color='k', bins=50, alpha=0.6)
+            # df_before.hist(color='k', bins=50, alpha=0.6)
             self.df.hist(color='k', bins=50, alpha=0.6)
+            plt.suptitle('before selection of nuclei')
+            self.df[self.good_nuclei].hist(color='k', bins=50, alpha=0.6)
+            plt.suptitle('after selection of nuclei')
+
+            _, ax = plt.subplots()
+            w2 = self.ws
+            w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0
+            # show watershed after selections.
+            if z is None:
+                ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower')
+            else:
+                ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower')
+            ax.set_title('after selection of good nuclei')
+
+    def apply_to_channels(self, filename, id):
+        """
+        Apply nuclear marker to other channels.
+
+        :param filename:
+        :param id: ID for this channel. Can be a number or a string, e.g. 'Sox17'.
+        :return:
+        """
+        if self.ws is None:
+            print('ERROR: run segment first')
+            return
+
+        im = io.imread(filename)
+        assert self.ws.shape == im.shape
+        self.channels[id] = self._regionprops_to_dataframe(self.ws, im)
 
     def detect_peaks(self, neighborhood=None):
         # http://stackoverflow.com/questions/3684484/peak-detection-in-a-2d-array
 
         """
-        Takes an image and detect the peaks usingthe local maximum filter.
+        Takes an image and detect the peaks using the local maximum filter.
         Returns a boolean mask of the peaks (i.e. 1 when
         the pixel's value is the neighborhood maximum, 0 otherwise)
         """
@@ -341,7 +395,8 @@ class Ws3d(object):
 
         return detected_peaks
 
-    def myrandom_cmap(self, seed=None, return_darker=False, n=1024):
+    @staticmethod
+    def myrandom_cmap(seed=None, return_darker=False, n=1024):
 
         """
         make random colormap, good for plotting segmentation
@@ -362,3 +417,25 @@ class Ws3d(object):
             return mpl.colors.ListedColormap(random_array), mpl.colors.ListedColormap(random_array2)
         else:
             return mpl.colors.ListedColormap(random_array)
+
+
+def nice_spines(ax):
+    ax.grid(True)
+    gridlines = ax.get_xgridlines() + ax.get_ygridlines()
+    for line in gridlines:
+        line.set_linestyle('-')
+        line.set_linewidth(.1)
+
+    spines_to_remove = ['top', 'right']
+    spines_to_keep = ['bottom', 'left']
+    rcParams['xtick.direction'] = 'out'
+    rcParams['ytick.direction'] = 'out'
+    almost_black = '#262626'
+
+    for spine in spines_to_remove:
+        ax.spines[spine].set_visible(False)
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+    for spine in spines_to_keep:
+        ax.spines[spine].set_linewidth(0.5)
+        ax.spines[spine].set_color(almost_black)
