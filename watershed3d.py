@@ -14,7 +14,7 @@ from skimage.segmentation import random_walker
 import numpy as np
 import skimage.io as io
 import matplotlib.pylab as plt
-import mahotas as mh
+import pandas as pd
 
 io.use_plugin('tifffile')
 sys.path.append('/Users/jakob/Documents/RU/Code/segment')
@@ -48,6 +48,7 @@ class Ws3d(object):
         self.peak_array = None
         self.probability_map = None
         self.ws = None
+        self.df = None
         self.probability_map_filename = re.sub('\.tif$', '_Probabilities.h5', self.filename, re.IGNORECASE)
         if not os.path.isfile(self.probability_map_filename):
             print('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik classification?')
@@ -149,14 +150,15 @@ class Ws3d(object):
 
     def histogram_plot(self):
 
-        fig, ax = plt.subplots(figsize=(8, 4))
-        flat = self.image_stack.flatten()
-        ax.hist(flat, log=True, bins=np.arange(0, flat.max(), 200), range=(0, flat.max()))
+        with plt.style.context('ggplot'):
+            fig, ax = plt.subplots(figsize=(8, 4))
+            flat = self.image_stack.flatten()
+            ax.hist(flat, log=True, bins=np.arange(0, flat.max(), 200), range=(0, flat.max()))
 
-        _ = ax.set_title('Min value: %i, Max value: %i, Image shape: %s \n'
-                         % (self.image_stack.min(),
-                            self.image_stack.max(),
-                            self.image_stack.shape))
+            _ = ax.set_title('Min value: %i, Max value: %i, Image shape: %s \n'
+                             % (self.image_stack.min(),
+                                self.image_stack.max(),
+                                self.image_stack.shape))
 
     def filter_probability_map(self, sigma=None):
         """
@@ -189,7 +191,6 @@ class Ws3d(object):
         :param min_distance:
         :param sigma:
         :param do_not_use_object_classifier:
-        :return:
         """
 
         if self.probability_map is None:
@@ -218,16 +219,24 @@ class Ws3d(object):
 
             self.ws = skimage.morphology.watershed(self.image_stack, markers, mask=self.mask)
 
+            # make a dataframe with some of the regionprops in it
+            rp = skimage.measure.regionprops(self.ws, intensity_image=self.image_stack)
+            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
+            rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            indices = [i1.label for i1 in rp]
+            indices = pd.Index(indices, name='cell_id')
+            self.df = pd.DataFrame(rpd, index=indices, columns=columns)
+
             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
-    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=123):
+    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130):
         """
-        Show segmentation on the maximum intensity projection.
+        Show segmentation on the maximum intensity projection or per z-slice
 
-        :param z:
-        :param contrast_stretch:
-        :param figsize:
-        :return:
+        :param z: plot only this z
+        :param contrast_stretch: enhance contrast for better visibility
+        :param figsize: figure size
+        :param seed:  seed for the random color map
         """
 
         if self.peaks is None:
@@ -260,6 +269,43 @@ class Ws3d(object):
         ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr');
         ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
         ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
+
+    def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=True):
+        """
+        Select nuclei based on their size. Use quantiles or a hard cutoff. Cutoff overrides quantiles.
+
+        :param quantiles: Quantiles (default [0.1, 0.9]).
+        :param cutoff: [lower, upper] cutoff. If specified, overrides quantiles!
+        :param plot: plot distributions before and after
+        """
+
+        assert self.df is not None
+        df_before = self.df
+
+        if cutoff is not None:
+            if len(cutoff) != 2:
+                print("ERROR, len(cutoff) must be 2 (lower and upper cutoff).")
+                return
+            else:
+                self.df = self.df[(self.df.area > cutoff[0]) & (self.df.area < cutoff[1])]
+
+        else:
+            lims = [self.df.area.quantile(quantiles[0]), self.df.area.quantile(quantiles[1])]
+            self.df = self.df[(self.df.area > lims[0]) & (self.df.area < lims[1])]
+
+        if plot:
+            # _, ax = plt.subplots()
+
+            # a_heights, a_bins = np.histogram(df_before.area, 50)
+            # b_heights, b_bins = np.histogram(self.df.area, bins=a_bins)
+            #
+            # width = (a_bins[1] - a_bins[0]) / 3
+            #
+            # ax.bar(a_bins[:-1], a_heights, width=width, facecolor='cornflowerblue')
+            # ax.bar(b_bins[:-1] + width, b_heights, width=width, facecolor='seagreen')
+
+            df_before.hist(color='k', bins=50, alpha=0.6)
+            self.df.hist(color='k', bins=50, alpha=0.6)
 
     def detect_peaks(self, neighborhood=None):
         # http://stackoverflow.com/questions/3684484/peak-detection-in-a-2d-array
