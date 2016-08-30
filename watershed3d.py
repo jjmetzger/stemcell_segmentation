@@ -16,6 +16,7 @@ import skimage.io as io
 import matplotlib.pylab as plt
 import pandas as pd
 from matplotlib.pyplot import rcParams
+from scipy.ndimage.measurements import center_of_mass
 
 io.use_plugin('tifffile')
 sys.path.append('/Users/jakob/Documents/RU/Code/segment')
@@ -64,6 +65,8 @@ class Ws3d(object):
         if not os.path.isfile(self.filename_op):
             print('No object prediction file ({:s}) found - segmenting without.'.format(self.filename_op))
             self.have_op = False
+
+        self.find_center_of_colony()
 
     def load_mask(self, prob=0.5, foreground_index=1):
         """
@@ -248,6 +251,7 @@ class Ws3d(object):
         rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
         indices = [i1.label for i1 in rp]
         indices = pd.Index(indices, name='cell_id')
+        print('len rp=', len(rp))
         return pd.DataFrame(rpd, index=indices, columns=columns)
 
     def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130):
@@ -336,8 +340,10 @@ class Ws3d(object):
             plt.suptitle('after selection of nuclei')
 
             _, ax = plt.subplots()
-            w2 = self.ws
-            w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0
+            w2 = self.ws.copy() #note the copy here, otherwise next line also affects self.ws
+            w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0 # set to 0
+            # all elements that are NOT in the good nuclei
+
             # show watershed after selections.
             if z is None:
                 ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower')
@@ -345,12 +351,13 @@ class Ws3d(object):
                 ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower')
             ax.set_title('after selection of good nuclei')
 
-    def apply_to_channels(self, filename, id):
+    def apply_to_channels(self, filename, id, remove_background=True):
         """
         Apply nuclear marker to other channels.
 
         :param filename:
         :param id: ID for this channel. Can be a number or a string, e.g. 'Sox17'.
+        :param remove_background:
         :return:
         """
         if self.ws is None:
@@ -358,8 +365,78 @@ class Ws3d(object):
             return
 
         im = io.imread(filename)
+        if remove_background:
+            im = self.remove_background(im)
         assert self.ws.shape == im.shape
         self.channels[id] = self._regionprops_to_dataframe(self.ws, im)
+
+    def find_center_of_colony(self):
+        """
+        find center of mass
+        """
+
+        self.center = np.array(center_of_mass(self.image_stack))
+
+    def radial_intensity(self, id, use_selected_nuclei=True):
+
+        if use_selected_nuclei and self.good_nuclei is None:
+            print("ERROR: selected use_selected_nuclei but didn't run select_nuclei")
+            return
+
+        # TODO: radial intensity across all or only good nuclei!
+
+    # @staticmethod
+    def _radial_profile(self, data, center, mask=None):
+        """
+        get radial profile. inspired by
+        http://stackoverflow.com/questions/21242011/most-efficient-way-to-calculate-radial-profile
+        but extended to include mask and z.
+
+        :param data:
+        :param center: Enter center in correct x, y order.
+        :return:
+        """
+
+        assert data.ndim == 3
+
+        if mask is not None:
+            if mask.shape != data.shape:
+                print("ERROR: data must have same shape as mask.")
+                return
+            elif not np.issubdtype(np.bool, mask.dtype):
+                print("ERROR: mask must be boolean")
+            else:
+                data[~mask] = 0  # set all False values to 0
+
+        y, x = np.indices(data.shape[1:])  # note inversion of x and y
+        r = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
+        r = r.astype(np.int)
+        radialprofile = np.zeros(r.max()+1, dtype=np.float)
+
+        for z in range(data.shape[0]):
+
+            tbin = np.bincount(r.ravel(), data[z].ravel())  # bincount makes +1 counts
+
+            if mask is None:
+                nr = np.bincount(r.ravel())
+            else:
+                nr = np.bincount(r.ravel(), mask[z].astype(np.int).ravel())  # this line makes the average, i.e. since
+                # we have
+                # more bins with certain r's, must divide by abundance. If have mask, some of those should not be counted.
+            radialprofile += tbin / nr
+        return np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile
+
+    @staticmethod
+    def remove_background(im, n=1000):
+        """
+        returns background subtracted image
+
+        :param im:
+        :param n:
+        :return:
+        """
+        imm = im.mean(axis=0)
+        return im - np.partition(imm[imm.nonzero()], n)[:n].mean()
 
     def detect_peaks(self, neighborhood=None):
         # http://stackoverflow.com/questions/3684484/peak-detection-in-a-2d-array
@@ -419,8 +496,9 @@ class Ws3d(object):
             return mpl.colors.ListedColormap(random_array)
 
 
-def nice_spines(ax):
-    ax.grid(True)
+def nice_spines(ax, grid=True):
+
+    ax.grid(grid)
     gridlines = ax.get_xgridlines() + ax.get_ygridlines()
     for line in gridlines:
         line.set_linestyle('-')
