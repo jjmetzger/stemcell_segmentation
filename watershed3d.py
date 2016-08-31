@@ -10,16 +10,18 @@ import skimage
 from scipy.ndimage.filters import maximum_filter, gaussian_filter
 # from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 from skimage.morphology import ball, binary_erosion
-from skimage.segmentation import random_walker
+# from skimage.segmentation import random_walker
 import numpy as np
 import skimage.io as io
 import matplotlib.pylab as plt
 import pandas as pd
 from matplotlib.pyplot import rcParams
-from scipy.ndimage.measurements import center_of_mass
+from scipy.ndimage.measurements import center_of_mass  #note this gives center of mass in column, row format,
+# i.e. to plot need to reverse
 
 io.use_plugin('tifffile')
 sys.path.append('/Users/jakob/Documents/RU/Code/segment')
+
 
 class Ws3d(object):
     """
@@ -52,9 +54,11 @@ class Ws3d(object):
         self.df = None
         self.good_nuclei = None
         self.channels = {}
+        self.channels_image = {}
         self.probability_map_filename = re.sub('\.tif$', '_Probabilities.h5', self.filename, re.IGNORECASE)
         if not os.path.isfile(self.probability_map_filename):
             print('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik classification?')
+            return
         self.mask = None
 
         # try to locate object prediction
@@ -80,6 +84,11 @@ class Ws3d(object):
 
         with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
             self.probability_map = h['exported_data'][:][:, :, :, foreground_index]  # index 1 is the nuclei
+
+        print("shape", self.probability_map.shape, self.image_stack.shape)
+        if not self.probability_map.shape == self.image_stack.shape:
+            print("ERROR: probability map does not have same dimensions as image")
+            return
 
         self.mask = self.probability_map > prob
         print('loaded probability map')
@@ -153,7 +162,7 @@ class Ws3d(object):
                     fig.delaxes(ax)
             fig.tight_layout()
 
-    def histogram_plot(self):
+    def intensity_histogram(self):
 
         with plt.style.context('ggplot'):
             fig, ax = plt.subplots(figsize=(8, 4))
@@ -182,14 +191,15 @@ class Ws3d(object):
             print('setting sigma to default (2, 6, 6)')
             sigma = (2, 6, 6)
 
-        pm = self.probability_map
+        pm = self.probability_map.copy()
+        print(pm.shape)
         pm = gaussian_filter(pm, sigma=sigma)
         # normalize back to [0,1]
         pm[pm > 1] = 1.
         pm[pm < 0.05] = 0.
         return pm
 
-    def segment(self, min_distance=None, sigma=None, do_not_use_object_classifier=False):
+    def segment(self, min_distance=2, sigma=(2,2,6), do_not_use_object_classifier=True):
         """
         Segment the image.
 
@@ -207,8 +217,8 @@ class Ws3d(object):
 
         # NO object classifier, use smoothed map and find peaks in probability map
         else:
-            if min_distance is None:
-                min_distance = 2
+            # if min_distance is None:
+            #     min_distance = 2
 
             # get smoothed probability map
             pm = self.filter_probability_map(sigma=sigma)
@@ -222,7 +232,9 @@ class Ws3d(object):
 
             markers = ndi.label(self.peak_array)[0]
 
-            self.ws = skimage.morphology.watershed(self.image_stack, markers, mask=self.mask)
+            self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
+            # self.ws = mh.cwatershed(-self.image_stack,markers)
+            # self.ws *= self.mask
 
             # make a dataframe with some of the regionprops in it
             # rp = skimage.measure.regionprops(self.ws, intensity_image=self.image_stack)
@@ -351,12 +363,12 @@ class Ws3d(object):
                 ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower')
             ax.set_title('after selection of good nuclei')
 
-    def apply_to_channels(self, filename, id, remove_background=True):
+    def apply_to_channels(self, filename, channel_id, remove_background=True):
         """
         Apply nuclear marker to other channels.
 
         :param filename:
-        :param id: ID for this channel. Can be a number or a string, e.g. 'Sox17'.
+        :param channel_id: ID for this channel. Can be a number or a string, e.g. 'Sox17'.
         :param remove_background:
         :return:
         """
@@ -368,7 +380,8 @@ class Ws3d(object):
         if remove_background:
             im = self.remove_background(im)
         assert self.ws.shape == im.shape
-        self.channels[id] = self._regionprops_to_dataframe(self.ws, im)
+        self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)
+        self.channels_image[channel_id] = im
 
     def find_center_of_colony(self):
         """
@@ -377,24 +390,34 @@ class Ws3d(object):
 
         self.center = np.array(center_of_mass(self.image_stack))
 
-    def radial_intensity(self, id, use_selected_nuclei=True):
+    def radial_intensity(self, channel_id, use_selected_nuclei=True, plot=False):
+        """
+        Get radial intensity either for all nuclei or only selected ones.
+
+        :param channel_id:
+        :param use_selected_nuclei:
+        :return:
+        """
 
         if use_selected_nuclei and self.good_nuclei is None:
             print("ERROR: selected use_selected_nuclei but didn't run select_nuclei")
             return
 
-        # TODO: radial intensity across all or only good nuclei!
+        if use_selected_nuclei:
+            return self._radial_profile(self.channels_image[channel_id], self.mask.astype(np.bool), plot=plot)
+        else:
+            return self._radial_profile(self.channels_image[channel_id], plot=plot)
 
-    # @staticmethod
-    def _radial_profile(self, data, center, mask=None):
+    def _radial_profile(self, data, mask=None, plot=False):
         """
         get radial profile. inspired by
         http://stackoverflow.com/questions/21242011/most-efficient-way-to-calculate-radial-profile
         but extended to include mask and z.
-
+        NOTE: expects center to be in (column, row) format as returned by center_of_mass and find_colony_center.
+        This means that x, y in this function are NOT reversed!!!
         :param data:
-        :param center: Enter center in correct x, y order.
-        :return:
+        # :param center: Enter center in form column, row as returned by find_colony_center.
+        :return: radius, radial profile
         """
 
         assert data.ndim == 3
@@ -408,22 +431,35 @@ class Ws3d(object):
             else:
                 data[~mask] = 0  # set all False values to 0
 
-        y, x = np.indices(data.shape[1:])  # note inversion of x and y
-        r = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
+        x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
+        r = np.sqrt((x - self.center[1]) ** 2 + (y - self.center[2]) ** 2)
         r = r.astype(np.int)
-        radialprofile = np.zeros(r.max()+1, dtype=np.float)
+        # now make 3d
+        r = np.tile(r, (data.shape[0], 1, 1))
 
-        for z in range(data.shape[0]):
+        tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
 
-            tbin = np.bincount(r.ravel(), data[z].ravel())  # bincount makes +1 counts
+        if mask is None:
+            nr = np.bincount(r.ravel())
+        else:
+            nr = np.bincount(r.ravel(), mask.astype(np.int).ravel())  # this line makes the average, i.e. since
+            # we have
+            # more bins with certain r's, must divide by abundance. If have mask, some of those should not be counted.
+        radialprofile = tbin / nr
+        if np.isnan(radialprofile).any():
+            print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+            radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
 
-            if mask is None:
-                nr = np.bincount(r.ravel())
-            else:
-                nr = np.bincount(r.ravel(), mask[z].astype(np.int).ravel())  # this line makes the average, i.e. since
-                # we have
-                # more bins with certain r's, must divide by abundance. If have mask, some of those should not be counted.
-            radialprofile += tbin / nr
+        if plot:
+            fig, ax = plt.subplots()
+            ax.plot(np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile)
+            ax.set_ylim([0., ax.get_ylim()[1]])
+            ax.set_xlim([0., ax.get_xlim()[1]/np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
+            ax.set_xlabel('distance ($\mu m$)')
+            ax.set_xlabel('intensity')
+            # where there is no colony anyway
+            nice_spines(ax)
+
         return np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile
 
     @staticmethod
@@ -438,39 +474,39 @@ class Ws3d(object):
         imm = im.mean(axis=0)
         return im - np.partition(imm[imm.nonzero()], n)[:n].mean()
 
-    def detect_peaks(self, neighborhood=None):
-        # http://stackoverflow.com/questions/3684484/peak-detection-in-a-2d-array
-
-        """
-        Takes an image and detect the peaks using the local maximum filter.
-        Returns a boolean mask of the peaks (i.e. 1 when
-        the pixel's value is the neighborhood maximum, 0 otherwise)
-        """
-
-        # define an 8-connected neighborhood
-        if neighborhood is None:
-            neighborhood = generate_binary_structure(len(self.probability_map.shape), 2)
-
-        # apply the local maximum filter; all pixel of maximal value
-        # in their neighborhood are set to 1
-        local_max = maximum_filter(self.probability_map, footprint=neighborhood) == self.probability_map
-        # local_max is a mask that contains the peaks we are
-        # looking for, but also the background.
-        # In order to isolate the peaks we must remove the background from the mask.
-
-        # we create the mask of the background
-        background = (self.probability_map == 0)
-
-        # a little technicality: we must erode the background in order to
-        # successfully subtract it form local_max, otherwise a line will
-        # appear along the background border (artifact of the local maximum filter)
-        eroded_background = binary_erosion(background, structure=neighborhood, border_value=1)
-
-        # we obtain the final mask, containing only peaks,
-        # by removing the background from the local_max mask
-        detected_peaks = local_max - eroded_background
-
-        return detected_peaks
+    # def detect_peaks(self, neighborhood=None):
+    #     # http://stackoverflow.com/questions/3684484/peak-detection-in-a-2d-array
+    #
+    #     """
+    #     Takes an image and detect the peaks using the local maximum filter.
+    #     Returns a boolean mask of the peaks (i.e. 1 when
+    #     the pixel's value is the neighborhood maximum, 0 otherwise)
+    #     """
+    #
+    #     # define an 8-connected neighborhood
+    #     if neighborhood is None:
+    #         neighborhood = generate_binary_structure(len(self.probability_map.shape), 2)
+    #
+    #     # apply the local maximum filter; all pixel of maximal value
+    #     # in their neighborhood are set to 1
+    #     local_max = maximum_filter(self.probability_map, footprint=neighborhood) == self.probability_map
+    #     # local_max is a mask that contains the peaks we are
+    #     # looking for, but also the background.
+    #     # In order to isolate the peaks we must remove the background from the mask.
+    #
+    #     # we create the mask of the background
+    #     background = (self.probability_map == 0)
+    #
+    #     # a little technicality: we must erode the background in order to
+    #     # successfully subtract it form local_max, otherwise a line will
+    #     # appear along the background border (artifact of the local maximum filter)
+    #     eroded_background = binary_erosion(background, structure=neighborhood, border_value=1)
+    #
+    #     # we obtain the final mask, containing only peaks,
+    #     # by removing the background from the local_max mask
+    #     detected_peaks = local_max - eroded_background
+    #
+    #     return detected_peaks
 
     @staticmethod
     def myrandom_cmap(seed=None, return_darker=False, n=1024):
