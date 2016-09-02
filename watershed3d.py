@@ -2,7 +2,6 @@ import sys
 import os
 import re
 import h5py
-import imutils
 import matplotlib as mpl
 from scipy import ndimage as ndi
 from skimage.feature import peak_local_max
@@ -62,6 +61,7 @@ class Ws3d(object):
             print('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik classification?')
             return
         self.mask = None
+        self.mask_selected = None
 
         # try to locate object prediction
         self.filename_op = re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE)
@@ -138,7 +138,7 @@ class Ws3d(object):
         if z is not None:
             fig, axes = plt.subplots(figsize=figsize)
             if contrast_stretch:
-                axes.imshow(imutils.contrast_stretch(image_to_plot[z]), cmap=cmap)
+                axes.imshow(_contrast_stretch(image_to_plot[z]), cmap=cmap)
             else:
                 ax = axes.imshow(image_to_plot[z], interpolation='None', cmap=cmap)
                 ax.set_clim(0, image_to_plot[z].max())
@@ -153,7 +153,7 @@ class Ws3d(object):
                 j = n % ncols
 
                 if contrast_stretch:
-                    axes[i, j].imshow(imutils.contrast_stretch(image_to_plot[n]), interpolation='None', cmap=cmap)
+                    axes[i, j].imshow(_contrast_stretch(image_to_plot[n]), interpolation='None', cmap=cmap)
                 else:
                     ax = axes[i, j].imshow(image_to_plot[n], interpolation='None', cmap=cmap)
                     ax.set_clim(0, image_to_plot.max())
@@ -293,7 +293,7 @@ class Ws3d(object):
         else:
             mip = self.image_stack[z]
         if contrast_stretch:
-            ax[0].imshow(imutils.contrast_stretch(mip), cmap=plt.cm.viridis)
+            ax[0].imshow(_contrast_stretch(mip), cmap=plt.cm.viridis)
         else:
             ax[0].imshow(mip, cmap=plt.cm.viridis)
 
@@ -366,7 +366,7 @@ class Ws3d(object):
             w2 = self.ws.copy()  # note the copy here, otherwise next line also affects self.ws
             # w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0 # set to 0
             w2[~np.in1d(self.ws, np.array(self.df[self.df['good_nuclei']].index)).reshape(self.ws.shape)] = 0 # set to 0
-
+            self.mask_selected = w2 > 0
             # all elements that are NOT in the good nuclei
 
             # show watershed after selections.
@@ -399,7 +399,7 @@ class Ws3d(object):
 
         try:
             self.df.drop(channel_id, axis=1, inplace=1)
-        except ValueError: # does not exist
+        except ValueError:  # does not exist
             pass
 
         self.df = pd.concat([self.df, channel_df[channel_id]], axis=1)
@@ -412,20 +412,20 @@ class Ws3d(object):
 
         self.center = np.array(center_of_mass(self.image_stack))
 
-    def radial_intensity(self, channel_id, use_selected_nuclei=True, plot=True):
+    def radial_intensity(self, channel_id, only_selected_nuclei=False, plot=True):
         """
         Get radial intensity either for all nuclei or only selected ones.
 
         :param channel_id:
-        :param use_selected_nuclei:
+        :param only_selected_nuclei:
         :return:
         """
 
-        if use_selected_nuclei and self.df.good_nuclei is None:
+        if only_selected_nuclei and self.df.good_nuclei is None:
             print("ERROR: selected use_selected_nuclei but didn't run select_nuclei")
             return
 
-        if use_selected_nuclei:
+        if only_selected_nuclei:
             return self._radial_profile(self.channels_image[channel_id], self.mask.astype(np.bool), plot=plot,
                                         channel_name=channel_id)
         else:
@@ -494,7 +494,7 @@ class Ws3d(object):
 
     def dot_plot(self, channel_id, colormap_cutoff=0.5, only_selected_cells=False):
         """
-        Classic dot-plot as in Warmflash et al.
+        Dot-plot as in Warmflash et al.
 
         :param channel_id:
         :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
@@ -515,6 +515,7 @@ class Ws3d(object):
 
     def copy_data_to_clipboard(self):
         """
+        copy data to clipboard
 
         """
         self.df.to_clipboard()
@@ -551,6 +552,56 @@ class Ws3d(object):
             nice_spines(ax)
         return xn, n/n2
 
+    def coexpression_per_cell(self, channel_id1, channel_id2, only_selected_cells=False):
+        """
+        Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
+
+        :param channel_id1:
+        :param channel_id2:
+        :param only_selected_cells:
+        :return:
+        """
+
+        index = self._get_indices(only_selected_cells)
+
+        ch1 = self.df[channel_id1][index].values
+        ch2 = self.df[channel_id1][index].values
+
+        fig, ax = plt.subplots()
+        ax.scatter(ch1, ch2, edgecolors='none', c='k', alpha=0.8)
+        ax.set_xlabel(ch1, fontsize=self.fontsize)
+        ax.set_ylabel(ch2, fontsize=self.fontsize)
+        ax.autoscale(tight=1)
+
+    def coexpression_per_pixel(self, channel_id1, channel_id2, downsample=10, only_selected_cells=False):
+
+        """
+        Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one nuclear pixel.
+
+        :param channel_id1:
+        :param channel_id2:
+        :param downsample:
+        :param only_selected_cells:
+        :return:
+        """
+
+        ch1 = self.channels_image[channel_id1]
+        ch2 = self.channels_image[channel_id2]
+
+        if only_selected_cells:
+            mask = self.mask_selected
+        else:
+            mask = self.mask
+
+        fig, ax = plt.subplots()
+        ax.scatter(ch1[mask > 0][::10], ch2[mask > 0][::downsample], marker='o', edgecolors='none', c='k',
+                   alpha=0.8, s=4)
+        nice_spines(ax)
+        ax.autoscale(tight=1)
+        ax.set_xlabel(channel_id1)
+        ax.set_ylabel(channel_id2)
+
+    # static methods
     @staticmethod
     def remove_background(im, n=1000):
         """
@@ -612,3 +663,15 @@ def nice_spines(ax, grid=True):
     for spine in spines_to_keep:
         ax.spines[spine].set_linewidth(0.5)
         ax.spines[spine].set_color(almost_black)
+
+
+def _contrast_stretch(img, percentile=(2,98)):
+    """
+    Stretch the contrast of an image to within given percentiles.
+
+    :param img: Input image
+    :param percentile: (lower percentile, upper percentile)
+    :return: contrast stretched image
+    """
+    p2, p98 = np.percentile(img, percentile)
+    return skimage.exposure.rescale_intensity(img, in_range=(p2, p98))
