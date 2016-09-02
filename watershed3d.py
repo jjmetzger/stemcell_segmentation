@@ -40,6 +40,7 @@ class Ws3d(object):
         :param z_scale:
         """
 
+        self.fontsize = 16
         self.filename = imagefile
         self.image_stack = io.imread(imagefile)
         self.z_size, self.x_size, self.y_size = self.image_stack.shape
@@ -411,7 +412,7 @@ class Ws3d(object):
 
         self.center = np.array(center_of_mass(self.image_stack))
 
-    def radial_intensity(self, channel_id, use_selected_nuclei=True, plot=False):
+    def radial_intensity(self, channel_id, use_selected_nuclei=True, plot=True):
         """
         Get radial intensity either for all nuclei or only selected ones.
 
@@ -425,11 +426,12 @@ class Ws3d(object):
             return
 
         if use_selected_nuclei:
-            return self._radial_profile(self.channels_image[channel_id], self.mask.astype(np.bool), plot=plot)
+            return self._radial_profile(self.channels_image[channel_id], self.mask.astype(np.bool), plot=plot,
+                                        channel_name=channel_id)
         else:
-            return self._radial_profile(self.channels_image[channel_id], plot=plot)
+            return self._radial_profile(self.channels_image[channel_id], plot=plot, channel_name=channel_id)
 
-    def _radial_profile(self, data, mask=None, plot=False):
+    def _radial_profile(self, data, mask=None, plot=False, channel_name=''):
         """
         get radial profile. inspired by
         http://stackoverflow.com/questions/21242011/most-efficient-way-to-calculate-radial-profile
@@ -477,14 +479,20 @@ class Ws3d(object):
             ax.plot(np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile)
             ax.set_ylim([0., ax.get_ylim()[1]])
             ax.set_xlim([0., ax.get_xlim()[1]/np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
-            ax.set_xlabel('distance ($\mu m$)')
-            ax.set_xlabel('intensity')
+            ax.set_xlabel('distance ($\mu m$)', fontsize=self.fontsize)
+            ax.set_ylabel(str(channel_name) + ' intensity', fontsize=self.fontsize)
             # where there is no colony anyway
             nice_spines(ax)
 
         return np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile
 
-    def dot_plot(self, channel_id, colormap_cutoff=0.5):
+    def _get_indices(self, only_selected_cells):
+        if only_selected_cells:
+            return self.df.good_nuclei
+        else:
+            return self.df.index  # all
+
+    def dot_plot(self, channel_id, colormap_cutoff=0.5, only_selected_cells=False):
         """
         Classic dot-plot as in Warmflash et al.
 
@@ -493,11 +501,13 @@ class Ws3d(object):
         :return:
         """
 
+        index = self._get_indices(only_selected_cells)
+
         fig, ax = plt.subplots()
-        cax = ax.scatter(np.vstack(self.df.centroid.values.flat)[:, 1], np.vstack(self.df.centroid.values.flat)[:, 2],
-                         c=self.df[channel_id].values,
+        cax = ax.scatter(np.vstack(self.df.centroid[index].values.flat)[:, 1], np.vstack(
+            self.df.centroid[index].values.flat)[:, 2], c=self.df[channel_id][index].values,
                          s=40, edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*self.df[
-                channel_id].values.max())
+                channel_id][index].values.max())
         nice_spines(ax)
         ax.autoscale(tight=1)
         ax.set_aspect('equal')
@@ -509,29 +519,37 @@ class Ws3d(object):
         """
         self.df.to_clipboard()
 
-    def radial_profile_per_cell(self, channel_id, nbins=30):
+    def radial_profile_per_cell(self, channel_id, nbins=30, plot=True, only_selected_cells=False):
         """
 
         :param channel_id:
         :param nbins:
         :return:
         """
-        x = np.vstack(self.df.centroid.values.flat)[:, 1]
-        y = np.vstack(self.df.centroid.values.flat)[:, 2]
+        index = self._get_indices(only_selected_cells)
+
+        x = np.vstack(self.df.centroid[index].values.flat)[:, 1]
+        y = np.vstack(self.df.centroid[index].values.flat)[:, 2]
+        i = self.df[channel_id][index].values
+
         r = np.sqrt((x-self.center[1])**2+(y-self.center[2])**2)
-        r = np.round(r).astype(np.int)
-        i = self.df[channel_id].values
-        # tbin = np.bincount(r, i)
-        # nr = np.bincount(r)
+        # r = np.round(r).astype(np.int)
+
+        # n = np.bincount(r, i)
+        # n2 = np.bincount(r)
+        # xn = np.arange(r.min(),r.max())
         n, xn = np.histogram(r, bins=nbins, weights=i)
         n2, _ = np.histogram(r, bins=nbins)
-        plt.bar()
-        # return xn, n/n2
 
-    def _radial_profile_per_cell(self, i, r):
-        # already have dataframe with cells
-        # have one value per cell, and one radius. Need to bin and divide by number of entries.
-        assert i.shape == r.shape
+        if plot:
+            _, ax = plt.subplots()
+            ax.step(xn[:-1] - xn[0], n/n2, where='mid')
+            ax.fill_between(xn[:-1] - xn[0], n/n2, alpha=0.2, step='mid')
+            ax.set_xlabel('r', fontsize=self.fontsize)
+            ax.set_ylabel(channel_id, fontsize=self.fontsize)
+            # ax.set_xlim([0, ax.get_xlim()[1]])
+            nice_spines(ax)
+        return xn, n/n2
 
     @staticmethod
     def remove_background(im, n=1000):
