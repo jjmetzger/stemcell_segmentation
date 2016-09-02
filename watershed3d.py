@@ -15,7 +15,7 @@ import skimage.io as io
 import matplotlib.pylab as plt
 import pandas as pd
 from matplotlib.pyplot import rcParams
-from scipy.ndimage.measurements import center_of_mass  #note this gives center of mass in column, row format,
+from scipy.ndimage.measurements import center_of_mass  # note this gives center of mass in column, row format,
 # i.e. to plot need to reverse
 
 io.use_plugin('tifffile')
@@ -118,6 +118,7 @@ class Ws3d(object):
         :param z: can select a specific z to plot
         :param contrast_stretch: enhance contrast
         :param figsize: set the size of the figure when plotting a single z-slice, default is (10,10)
+        :param cmap: colormap
         :return:
         """
 
@@ -282,9 +283,9 @@ class Ws3d(object):
             print('do not have cell positions, run segment first')
 
         if figsize is None:
-            figsize = (6,12)
+            figsize = (6, 12)
         # self.grid_plot(self.image_stack,  z=z, contrast_stretch=contrast_stretch, figsize=figsize)
-        _, ax = plt.subplots(1,2,figsize=figsize)
+        _, ax = plt.subplots(1, 2, figsize=figsize)
 
         # show seeds on the original image
         if z is None:
@@ -414,45 +415,22 @@ class Ws3d(object):
 
     def radial_intensity(self, channel_id, only_selected_nuclei=False, plot=True):
         """
-        Get radial intensity either for all nuclei or only selected ones.
+        Get radial intensity either for all nuclei or only selected ones. This uses the pixel information,
+        not the segmentation.
 
         :param channel_id:
         :param only_selected_nuclei:
+        :param plot:
         :return:
         """
 
-        if only_selected_nuclei and self.df.good_nuclei is None:
-            print("ERROR: selected use_selected_nuclei but didn't run select_nuclei")
-            return
+        data = self.channels_image[channel_id]
 
         if only_selected_nuclei:
-            return self._radial_profile(self.channels_image[channel_id], self.mask.astype(np.bool), plot=plot,
-                                        channel_name=channel_id)
+            mask = self.mask_selected
         else:
-            return self._radial_profile(self.channels_image[channel_id], plot=plot, channel_name=channel_id)
-
-    def _radial_profile(self, data, mask=None, plot=False, channel_name=''):
-        """
-        get radial profile. inspired by
-        http://stackoverflow.com/questions/21242011/most-efficient-way-to-calculate-radial-profile
-        but extended to include mask and z.
-        NOTE: expects center to be in (column, row) format as returned by center_of_mass and find_colony_center.
-        This means that x, y in this function are NOT reversed!!!
-        :param data:
-        # :param center: Enter center in form column, row as returned by find_colony_center.
-        :return: radius, radial profile
-        """
-
-        assert data.ndim == 3
-
-        if mask is not None:
-            if mask.shape != data.shape:
-                print("ERROR: data must have same shape as mask.")
-                return
-            elif not np.issubdtype(np.bool, mask.dtype):
-                print("ERROR: mask must be boolean")
-            else:
-                data[~mask] = 0  # set all False values to 0
+            mask = self.mask
+        data[~mask] = 0  # set all False values to 0
 
         x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
         r = np.sqrt((x - self.center[1]) ** 2 + (y - self.center[2]) ** 2)
@@ -480,7 +458,7 @@ class Ws3d(object):
             ax.set_ylim([0., ax.get_ylim()[1]])
             ax.set_xlim([0., ax.get_xlim()[1]/np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
             ax.set_xlabel('distance ($\mu m$)', fontsize=self.fontsize)
-            ax.set_ylabel(str(channel_name) + ' intensity', fontsize=self.fontsize)
+            ax.set_ylabel(str(channel_id) + ' intensity', fontsize=self.fontsize)
             # where there is no colony anyway
             nice_spines(ax)
 
@@ -498,6 +476,7 @@ class Ws3d(object):
 
         :param channel_id:
         :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
+        :param only_selected_cells:
         :return:
         """
 
@@ -524,7 +503,9 @@ class Ws3d(object):
         """
 
         :param channel_id:
-        :param nbins:
+        :param nbins: number of bins
+        :param plot:
+        :param only_selected_cells:
         :return:
         """
         index = self._get_indices(only_selected_cells)
@@ -565,7 +546,7 @@ class Ws3d(object):
         index = self._get_indices(only_selected_cells)
 
         ch1 = self.df[channel_id1][index].values
-        ch2 = self.df[channel_id1][index].values
+        ch2 = self.df[channel_id2][index].values
 
         fig, ax = plt.subplots()
         ax.scatter(ch1, ch2, edgecolors='none', c='k', alpha=0.8)
@@ -665,7 +646,7 @@ def nice_spines(ax, grid=True):
         ax.spines[spine].set_color(almost_black)
 
 
-def _contrast_stretch(img, percentile=(2,98)):
+def _contrast_stretch(img, percentile=(2, 98)):
     """
     Stretch the contrast of an image to within given percentiles.
 
