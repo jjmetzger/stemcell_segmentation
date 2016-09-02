@@ -52,8 +52,9 @@ class Ws3d(object):
         self.probability_map = None
         self.ws = None
         self.df = None
-        self.good_nuclei = None
-        self.channels = {}
+        # self.good_nuclei = None
+        self.center = None
+        # self.channels = {}
         self.channels_image = {}
         self.probability_map_filename = re.sub('\.tif$', '_Probabilities.h5', self.filename, re.IGNORECASE)
         if not os.path.isfile(self.probability_map_filename):
@@ -199,7 +200,7 @@ class Ws3d(object):
         pm[pm < 0.05] = 0.
         return pm
 
-    def segment(self, min_distance=2, sigma=(2,2,6), do_not_use_object_classifier=True):
+    def segment(self, min_distance=2, sigma=(2, 2, 6), do_not_use_object_classifier=True):
         """
         Segment the image.
 
@@ -296,7 +297,7 @@ class Ws3d(object):
             ax[0].imshow(mip, cmap=plt.cm.viridis)
 
         ax[0].set_title('maximum intensity projection')
-        ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr');
+        ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
         ax[0].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
         ax[0].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
@@ -305,7 +306,7 @@ class Ws3d(object):
             ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
         else:
             ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed))
-        ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr');
+        ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
         ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
         ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
@@ -326,14 +327,23 @@ class Ws3d(object):
                 print("ERROR, len(cutoff) must be 2 (lower and upper cutoff).")
                 return
             else:
-                self.good_nuclei = (self.df.area > cutoff[0]) & (self.df.area < cutoff[1])
+                good_nuclei = (self.df.area > cutoff[0]) & (self.df.area < cutoff[1])
                 # self.df = self.df[(self.df.area > cutoff[0]) & (self.df.area < cutoff[1])]
 
         else:
             lims = [self.df.area.quantile(quantiles[0]), self.df.area.quantile(quantiles[1])]
-            self.good_nuclei = (self.df.area > lims[0]) & (self.df.area < lims[1])
+            good_nuclei = (self.df.area > lims[0]) & (self.df.area < lims[1])
             # self.df = self.df[(self.df.area > lims[0]) & (self.df.area < lims[1])]
 
+        # good nuclei is a Series, not a DataFrame
+        good_nuclei.name = 'good_nuclei'
+        # check whether already exists
+        try:
+            self.df.drop('good_nuclei', axis=1, inplace=1)
+        except ValueError: # does not exist
+            pass
+
+        self.df = pd.concat([self.df, good_nuclei], axis=1)
         if plot:
             # _, ax = plt.subplots()
 
@@ -348,12 +358,14 @@ class Ws3d(object):
             # df_before.hist(color='k', bins=50, alpha=0.6)
             self.df.hist(color='k', bins=50, alpha=0.6)
             plt.suptitle('before selection of nuclei')
-            self.df[self.good_nuclei].hist(color='k', bins=50, alpha=0.6)
+            self.df[self.df.good_nuclei].hist(color='k', bins=50, alpha=0.6)
             plt.suptitle('after selection of nuclei')
 
             _, ax = plt.subplots()
-            w2 = self.ws.copy() #note the copy here, otherwise next line also affects self.ws
-            w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0 # set to 0
+            w2 = self.ws.copy()  # note the copy here, otherwise next line also affects self.ws
+            # w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0 # set to 0
+            w2[~np.in1d(self.ws, np.array(self.df[self.df['good_nuclei']].index)).reshape(self.ws.shape)] = 0 # set to 0
+
             # all elements that are NOT in the good nuclei
 
             # show watershed after selections.
@@ -380,7 +392,16 @@ class Ws3d(object):
         if remove_background:
             im = self.remove_background(im)
         assert self.ws.shape == im.shape
-        self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)
+        # self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)
+        channel_df = self._regionprops_to_dataframe(self.ws, im)
+        channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid']
+
+        try:
+            self.df.drop(channel_id, axis=1, inplace=1)
+        except ValueError: # does not exist
+            pass
+
+        self.df = pd.concat([self.df, channel_df[channel_id]], axis=1)
         self.channels_image[channel_id] = im
 
     def find_center_of_colony(self):
@@ -399,7 +420,7 @@ class Ws3d(object):
         :return:
         """
 
-        if use_selected_nuclei and self.good_nuclei is None:
+        if use_selected_nuclei and self.df.good_nuclei is None:
             print("ERROR: selected use_selected_nuclei but didn't run select_nuclei")
             return
 
@@ -444,7 +465,8 @@ class Ws3d(object):
         else:
             nr = np.bincount(r.ravel(), mask.astype(np.int).ravel())  # this line makes the average, i.e. since
             # we have
-            # more bins with certain r's, must divide by abundance. If have mask, some of those should not be counted.
+            # more bins with certain r's, must divide by abundance. If have mask, some of those should not be
+            # counted, because they were set to zero above and should not contribute to the average.
         radialprofile = tbin / nr
         if np.isnan(radialprofile).any():
             print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
@@ -462,51 +484,70 @@ class Ws3d(object):
 
         return np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile
 
+    def dot_plot(self, channel_id, colormap_cutoff=0.5):
+        """
+        Classic dot-plot as in Warmflash et al.
+
+        :param channel_id:
+        :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
+        :return:
+        """
+
+        fig, ax = plt.subplots()
+        cax = ax.scatter(np.vstack(self.df.centroid.values.flat)[:, 1], np.vstack(self.df.centroid.values.flat)[:, 2],
+                         c=self.df[channel_id].values,
+                         s=40, edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*self.df[
+                channel_id].values.max())
+        nice_spines(ax)
+        ax.autoscale(tight=1)
+        ax.set_aspect('equal')
+        fig.colorbar(cax)
+
+    def copy_data_to_clipboard(self):
+        """
+
+        """
+        self.df.to_clipboard()
+
+    def radial_profile_per_cell(self, channel_id, nbins=30):
+        """
+
+        :param channel_id:
+        :param nbins:
+        :return:
+        """
+        x = np.vstack(self.df.centroid.values.flat)[:, 1]
+        y = np.vstack(self.df.centroid.values.flat)[:, 2]
+        r = np.sqrt((x-self.center[1])**2+(y-self.center[2])**2)
+        r = np.round(r).astype(np.int)
+        i = self.df[channel_id].values
+        # tbin = np.bincount(r, i)
+        # nr = np.bincount(r)
+        n, xn = np.histogram(r, bins=nbins, weights=i)
+        n2, _ = np.histogram(r, bins=nbins)
+        plt.bar()
+        # return xn, n/n2
+
+    def _radial_profile_per_cell(self, i, r):
+        # already have dataframe with cells
+        # have one value per cell, and one radius. Need to bin and divide by number of entries.
+        assert i.shape == r.shape
+
     @staticmethod
     def remove_background(im, n=1000):
         """
-        returns background subtracted image
+        basic method to remove background, returns background subtracted image
 
-        :param im:
-        :param n:
-        :return:
+        :param im: image
+        :param n: lowest non-zero n pixels are used to estimate background
+        :return: background subtracted image
         """
         imm = im.mean(axis=0)
+        # following in comments has a bug
+        # im -= np.partition(imm[imm.nonzero()], n)[:n].mean().astype(im.dtype)
+        # im[im<0.] = 0.  # set negatives to 0
+        # return im
         return im - np.partition(imm[imm.nonzero()], n)[:n].mean()
-
-    # def detect_peaks(self, neighborhood=None):
-    #     # http://stackoverflow.com/questions/3684484/peak-detection-in-a-2d-array
-    #
-    #     """
-    #     Takes an image and detect the peaks using the local maximum filter.
-    #     Returns a boolean mask of the peaks (i.e. 1 when
-    #     the pixel's value is the neighborhood maximum, 0 otherwise)
-    #     """
-    #
-    #     # define an 8-connected neighborhood
-    #     if neighborhood is None:
-    #         neighborhood = generate_binary_structure(len(self.probability_map.shape), 2)
-    #
-    #     # apply the local maximum filter; all pixel of maximal value
-    #     # in their neighborhood are set to 1
-    #     local_max = maximum_filter(self.probability_map, footprint=neighborhood) == self.probability_map
-    #     # local_max is a mask that contains the peaks we are
-    #     # looking for, but also the background.
-    #     # In order to isolate the peaks we must remove the background from the mask.
-    #
-    #     # we create the mask of the background
-    #     background = (self.probability_map == 0)
-    #
-    #     # a little technicality: we must erode the background in order to
-    #     # successfully subtract it form local_max, otherwise a line will
-    #     # appear along the background border (artifact of the local maximum filter)
-    #     eroded_background = binary_erosion(background, structure=neighborhood, border_value=1)
-    #
-    #     # we obtain the final mask, containing only peaks,
-    #     # by removing the background from the local_max mask
-    #     detected_peaks = local_max - eroded_background
-    #
-    #     return detected_peaks
 
     @staticmethod
     def myrandom_cmap(seed=None, return_darker=False, n=1024):
