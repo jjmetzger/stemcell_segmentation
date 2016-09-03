@@ -79,9 +79,7 @@ class Ws3d(object):
         Load the probability mask and object prediction if it exists.
 
         :param prob: Set the probability for which
-        :param foreground_index: Set the index that contains the foreground (i.e. did you use the first or the
-        second label in Ilastik for the background? Default is that the first label (i.e. 0) is background and 1
-        corresponds to foreground.
+        :param foreground_index: Set the index that contains the foreground (i.e. did you use the first or the second label in Ilastik for the background? Default is that the first label (i.e. 0) is background and 1 corresponds to foreground.
         """
 
         with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
@@ -561,7 +559,7 @@ class Ws3d(object):
 
         :param channel_id1:
         :param channel_id2:
-        :param downsample:
+        :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
         :param only_selected_cells:
         :return:
         """

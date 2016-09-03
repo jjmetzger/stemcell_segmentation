@@ -1,0 +1,742 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>watershed3d &mdash; Stemcell Segmentation 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="top" title="Stemcell Segmentation 0.1 documentation" href="../index.html" />
+    <link rel="up" title="Module code" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head>
+  <body role="document">
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for watershed3d</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">h5py</span>
+<span class="kn">import</span> <span class="nn">matplotlib</span> <span class="kn">as</span> <span class="nn">mpl</span>
+<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">ndimage</span> <span class="k">as</span> <span class="n">ndi</span>
+<span class="kn">from</span> <span class="nn">skimage.feature</span> <span class="kn">import</span> <span class="n">peak_local_max</span>
+<span class="kn">import</span> <span class="nn">skimage</span>
+<span class="kn">from</span> <span class="nn">scipy.ndimage.filters</span> <span class="kn">import</span> <span class="n">maximum_filter</span><span class="p">,</span> <span class="n">gaussian_filter</span>
+<span class="c1"># from scipy.ndimage.morphology import generate_binary_structure, binary_erosion</span>
+<span class="kn">from</span> <span class="nn">skimage.morphology</span> <span class="kn">import</span> <span class="n">ball</span><span class="p">,</span> <span class="n">binary_erosion</span>
+<span class="c1"># from skimage.segmentation import random_walker</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">skimage.io</span> <span class="kn">as</span> <span class="nn">io</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pylab</span> <span class="kn">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="kn">as</span> <span class="nn">pd</span>
+<span class="kn">from</span> <span class="nn">matplotlib.pyplot</span> <span class="kn">import</span> <span class="n">rcParams</span>
+<span class="kn">from</span> <span class="nn">scipy.ndimage.measurements</span> <span class="kn">import</span> <span class="n">center_of_mass</span>  <span class="c1"># note this gives center of mass in column, row format,</span>
+<span class="c1"># i.e. to plot need to reverse</span>
+
+<span class="n">io</span><span class="o">.</span><span class="n">use_plugin</span><span class="p">(</span><span class="s1">&#39;tifffile&#39;</span><span class="p">)</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;/Users/jakob/Documents/RU/Code/segment&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="Ws3d"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d">[docs]</a><span class="k">class</span> <span class="nc">Ws3d</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Main watershed 3d class. Takes an image file and expects a _Probabillites.h5 file from Ilastik. If there is an</span>
+<span class="sd">    object classifier from Ilastik, uses this for seeding. Otherwise tries to guess blobs for seeding.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">imagefile</span><span class="p">,</span> <span class="n">xy_scale</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">z_scale</span><span class="o">=</span><span class="mf">1.5</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes Ws3d with an imagefile. Can set the relative x,y and z scales of the z-stack, which is important</span>
+<span class="sd">        for the blob</span>
+<span class="sd">        detection.</span>
+
+<span class="sd">        :param imagefile:</span>
+<span class="sd">        :param xy_scale:</span>
+<span class="sd">        :param z_scale:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">fontsize</span> <span class="o">=</span> <span class="mi">16</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">imagefile</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="n">imagefile</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">z_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">x_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">y_size</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">shape</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">xy_scale</span> <span class="o">=</span> <span class="n">xy_scale</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">z_scale</span> <span class="o">=</span> <span class="n">z_scale</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">peak_array</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ws</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">df</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="c1"># self.good_nuclei = None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">center</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="c1"># self.channels = {}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">channels_image</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">probability_map_filename</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s1">&#39;\.tif$&#39;</span><span class="p">,</span> <span class="s1">&#39;_Probabilities.h5&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">probability_map_filename</span><span class="p">):</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ERROR: file&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">probability_map_filename</span><span class="p">,</span> <span class="s1">&#39;not found. Did you do the Ilastik classification?&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mask</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mask_selected</span> <span class="o">=</span> <span class="bp">None</span>
+
+        <span class="c1"># try to locate object prediction</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filename_op</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s1">&#39;\.tif$&#39;</span><span class="p">,</span> <span class="s1">&#39;_Object Predictions.h5&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">op</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">have_op</span> <span class="o">=</span> <span class="bp">True</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filename_op</span><span class="p">):</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;No object prediction file ({:s}) found - segmenting without.&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filename_op</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">have_op</span> <span class="o">=</span> <span class="bp">False</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">find_center_of_colony</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Ws3d.load_mask"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.load_mask">[docs]</a>    <span class="k">def</span> <span class="nf">load_mask</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prob</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">foreground_index</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Load the probability mask and object prediction if it exists.</span>
+
+<span class="sd">        :param prob: Set the probability for which</span>
+<span class="sd">        :param foreground_index: Set the index that contains the foreground (i.e. did you use the first or the second label in Ilastik for the background? Default is that the first label (i.e. 0) is background and 1 corresponds to foreground.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">probability_map_filename</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">h</span><span class="p">:</span>  <span class="c1"># r+: read/write, file must exist</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span> <span class="o">=</span> <span class="n">h</span><span class="p">[</span><span class="s1">&#39;exported_data&#39;</span><span class="p">][:][:,</span> <span class="p">:,</span> <span class="p">:,</span> <span class="n">foreground_index</span><span class="p">]</span>  <span class="c1"># index 1 is the nuclei</span>
+
+        <span class="k">print</span><span class="p">(</span><span class="s2">&quot;shape&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s2">&quot;ERROR: probability map does not have same dimensions as image&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span> <span class="o">&gt;</span> <span class="n">prob</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;loaded probability map&#39;</span><span class="p">)</span>
+        <span class="c1"># self.probability_map[self.probability_map &lt; prob] = 0.</span>
+
+        <span class="c1"># load object prediction if there</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">have_op</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s1">&#39;\.tif$&#39;</span><span class="p">,</span> <span class="s1">&#39;_Object Predictions.h5&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">),</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">h</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">op</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">swapaxes</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="s1">&#39;exported_data&#39;</span><span class="p">]),</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>  <span class="c1"># object prediction</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;loaded object prediction&#39;</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">plot_probability_map</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">contrast_stretch</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;probability map not loaded, cannot plot - use load_mask first&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">grid_plot</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">contrast_stretch</span><span class="p">,</span> <span class="n">figsize</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Ws3d.grid_plot"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.grid_plot">[docs]</a>    <span class="k">def</span> <span class="nf">grid_plot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">image_to_plot</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">contrast_stretch</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Plot all z-slices</span>
+
+<span class="sd">        :param image_to_plot:</span>
+<span class="sd">        :param z: can select a specific z to plot</span>
+<span class="sd">        :param contrast_stretch: enhance contrast</span>
+<span class="sd">        :param figsize: set the size of the figure when plotting a single z-slice, default is (10,10)</span>
+<span class="sd">        :param cmap: colormap</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">image_to_plot</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">3</span>
+        <span class="k">except</span> <span class="ne">AssertionError</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Error: image to plot must be a z-stack, i.e. must have dimension .ndim == 3&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Error: image to plot is not in the correct format - needs to be a numpy array.&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="k">if</span> <span class="n">cmap</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">cmap</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">plasma</span>
+        <span class="c1"># cmap = plt.cm.Greys</span>
+        <span class="k">if</span> <span class="n">figsize</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">figsize</span> <span class="o">=</span> <span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">z</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="n">figsize</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">contrast_stretch</span><span class="p">:</span>
+                <span class="n">axes</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">_contrast_stretch</span><span class="p">(</span><span class="n">image_to_plot</span><span class="p">[</span><span class="n">z</span><span class="p">]),</span> <span class="n">cmap</span><span class="o">=</span><span class="n">cmap</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">ax</span> <span class="o">=</span> <span class="n">axes</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">image_to_plot</span><span class="p">[</span><span class="n">z</span><span class="p">],</span> <span class="n">interpolation</span><span class="o">=</span><span class="s1">&#39;None&#39;</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="n">cmap</span><span class="p">)</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">set_clim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">image_to_plot</span><span class="p">[</span><span class="n">z</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+        <span class="k">else</span><span class="p">:</span>
+
+            <span class="n">nrows</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">z_size</span><span class="p">)))</span>
+            <span class="n">ncols</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">z_size</span> <span class="o">//</span> <span class="n">nrows</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">nrows</span><span class="p">,</span> <span class="n">ncols</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">3</span> <span class="o">*</span> <span class="n">ncols</span><span class="p">,</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">nrows</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">z_size</span><span class="p">):</span>
+                <span class="n">i</span> <span class="o">=</span> <span class="n">n</span> <span class="o">//</span> <span class="n">ncols</span>
+                <span class="n">j</span> <span class="o">=</span> <span class="n">n</span> <span class="o">%</span> <span class="n">ncols</span>
+
+                <span class="k">if</span> <span class="n">contrast_stretch</span><span class="p">:</span>
+                    <span class="n">axes</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">_contrast_stretch</span><span class="p">(</span><span class="n">image_to_plot</span><span class="p">[</span><span class="n">n</span><span class="p">]),</span> <span class="n">interpolation</span><span class="o">=</span><span class="s1">&#39;None&#39;</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="n">cmap</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">ax</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">image_to_plot</span><span class="p">[</span><span class="n">n</span><span class="p">],</span> <span class="n">interpolation</span><span class="o">=</span><span class="s1">&#39;None&#39;</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="n">cmap</span><span class="p">)</span>
+                    <span class="n">ax</span><span class="o">.</span><span class="n">set_clim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">image_to_plot</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+
+            <span class="c1"># Remove empty plots</span>
+            <span class="k">for</span> <span class="n">ax</span> <span class="ow">in</span> <span class="n">axes</span><span class="o">.</span><span class="n">ravel</span><span class="p">():</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ax</span><span class="o">.</span><span class="n">images</span><span class="p">)):</span>
+                    <span class="n">fig</span><span class="o">.</span><span class="n">delaxes</span><span class="p">(</span><span class="n">ax</span><span class="p">)</span>
+            <span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span></div>
+
+    <span class="k">def</span> <span class="nf">intensity_histogram</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="k">with</span> <span class="n">plt</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">context</span><span class="p">(</span><span class="s1">&#39;ggplot&#39;</span><span class="p">):</span>
+            <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+            <span class="n">flat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">flat</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">flat</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span> <span class="mi">200</span><span class="p">),</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">flat</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+
+            <span class="n">_</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Min value: </span><span class="si">%i</span><span class="s1">, Max value: </span><span class="si">%i</span><span class="s1">, Image shape: </span><span class="si">%s</span><span class="s1"> </span><span class="se">\n</span><span class="s1">&#39;</span>
+                             <span class="o">%</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span>
+                                <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span>
+                                <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">shape</span><span class="p">))</span>
+
+<div class="viewcode-block" id="Ws3d.filter_probability_map"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.filter_probability_map">[docs]</a>    <span class="k">def</span> <span class="nf">filter_probability_map</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Filter the probability map using a gaussian filter. Use the dimensions provided.</span>
+
+<span class="sd">        :param sigma: Width of the gaussian filter. Needs to have len(sigma) == 3.</span>
+<span class="sd">        :return: filtered probability map</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">sigma</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span>
+        <span class="k">except</span> <span class="ne">AssertionError</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;sigma needs to have 3 elements for the three dimensions.&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">except</span> <span class="ne">TypeError</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;setting sigma to default (2, 6, 6)&#39;</span><span class="p">)</span>
+            <span class="n">sigma</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">)</span>
+
+        <span class="n">pm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">print</span><span class="p">(</span><span class="n">pm</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="n">pm</span> <span class="o">=</span> <span class="n">gaussian_filter</span><span class="p">(</span><span class="n">pm</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="n">sigma</span><span class="p">)</span>
+        <span class="c1"># normalize back to [0,1]</span>
+        <span class="n">pm</span><span class="p">[</span><span class="n">pm</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1.</span>
+        <span class="n">pm</span><span class="p">[</span><span class="n">pm</span> <span class="o">&lt;</span> <span class="mf">0.05</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.</span>
+        <span class="k">return</span> <span class="n">pm</span></div>
+
+<div class="viewcode-block" id="Ws3d.segment"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.segment">[docs]</a>    <span class="k">def</span> <span class="nf">segment</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">min_distance</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">sigma</span><span class="o">=</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="n">do_not_use_object_classifier</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Segment the image.</span>
+
+<span class="sd">        :param min_distance:</span>
+<span class="sd">        :param sigma:</span>
+<span class="sd">        :param do_not_use_object_classifier:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">probability_map</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;probability map not loaded, cannot segment - use load_mask first&#39;</span><span class="p">)</span>
+
+        <span class="c1"># have object classifier or don&#39;t</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">have_op</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">do_not_use_object_classifier</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+        <span class="c1"># NO object classifier, use smoothed map and find peaks in probability map</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># if min_distance is None:</span>
+            <span class="c1">#     min_distance = 2</span>
+
+            <span class="c1"># get smoothed probability map</span>
+            <span class="n">pm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">filter_probability_map</span><span class="p">(</span><span class="n">sigma</span><span class="o">=</span><span class="n">sigma</span><span class="p">)</span>
+            <span class="c1"># self.peaks = peak_local_max(pm, min_distance=min_distance)</span>
+
+            <span class="c1"># distance = ndi.distance_transform_edt(pm)</span>
+            <span class="c1"># self.peak_array = peak_local_max(distance, min_distance=min_distance, indices=False)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">peak_array</span> <span class="o">=</span> <span class="n">peak_local_max</span><span class="p">(</span><span class="n">pm</span><span class="p">,</span> <span class="n">min_distance</span><span class="o">=</span><span class="n">min_distance</span><span class="p">,</span> <span class="n">indices</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nonzero</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peak_array</span><span class="p">))</span>  <span class="c1"># same as above with indices True, but need that too</span>
+
+            <span class="n">markers</span> <span class="o">=</span> <span class="n">ndi</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peak_array</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">ws</span> <span class="o">=</span> <span class="n">skimage</span><span class="o">.</span><span class="n">morphology</span><span class="o">.</span><span class="n">watershed</span><span class="p">(</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="p">,</span> <span class="n">markers</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">mask</span><span class="p">)</span>
+            <span class="c1"># self.ws = mh.cwatershed(-self.image_stack,markers)</span>
+            <span class="c1"># self.ws *= self.mask</span>
+
+            <span class="c1"># make a dataframe with some of the regionprops in it</span>
+            <span class="c1"># rp = skimage.measure.regionprops(self.ws, intensity_image=self.image_stack)</span>
+            <span class="c1"># columns = (&#39;area&#39;, &#39;total_intensity&#39;, &#39;mean_intensity&#39;, &#39;centroid&#39;)</span>
+            <span class="c1"># rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]</span>
+            <span class="c1"># indices = [i1.label for i1 in rp]</span>
+            <span class="c1"># indices = pd.Index(indices, name=&#39;cell_id&#39;)</span>
+            <span class="c1"># self.df = pd.DataFrame(rpd, index=indices, columns=columns)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_regionprops_to_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="p">)</span>
+
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;segmentation done, found&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s1">&#39;cells&#39;</span><span class="p">)</span></div>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_regionprops_to_dataframe</span><span class="p">(</span><span class="n">ws</span><span class="p">,</span> <span class="n">image_stack</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Return pd.DataFrame with relevant entries from watershed image. Keep static so can use it for other images as</span>
+<span class="sd">        well.</span>
+
+<span class="sd">        :param ws: watershed array</span>
+<span class="sd">        :param image_stack: image array</span>
+<span class="sd">        :return: pd.DataFrame with entries (&#39;area&#39;, &#39;total_intensity&#39;, &#39;mean_intensity&#39;, &#39;centroid&#39;) and index &#39;cell_id&#39;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">rp</span> <span class="o">=</span> <span class="n">skimage</span><span class="o">.</span><span class="n">measure</span><span class="o">.</span><span class="n">regionprops</span><span class="p">(</span><span class="n">ws</span><span class="p">,</span> <span class="n">intensity_image</span><span class="o">=</span><span class="n">image_stack</span><span class="p">)</span>
+        <span class="n">columns</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;area&#39;</span><span class="p">,</span> <span class="s1">&#39;total_intensity&#39;</span><span class="p">,</span> <span class="s1">&#39;mean_intensity&#39;</span><span class="p">,</span> <span class="s1">&#39;centroid&#39;</span><span class="p">)</span>
+        <span class="n">rpd</span> <span class="o">=</span> <span class="p">[[</span><span class="n">i1</span><span class="o">.</span><span class="n">area</span><span class="p">,</span> <span class="n">i1</span><span class="o">.</span><span class="n">mean_intensity</span> <span class="o">*</span> <span class="n">i1</span><span class="o">.</span><span class="n">area</span><span class="p">,</span> <span class="n">i1</span><span class="o">.</span><span class="n">mean_intensity</span><span class="p">,</span> <span class="n">i1</span><span class="o">.</span><span class="n">coords</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)]</span> <span class="k">for</span> <span class="n">i1</span> <span class="ow">in</span> <span class="n">rp</span><span class="p">]</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="p">[</span><span class="n">i1</span><span class="o">.</span><span class="n">label</span> <span class="k">for</span> <span class="n">i1</span> <span class="ow">in</span> <span class="n">rp</span><span class="p">]</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">indices</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;cell_id&#39;</span><span class="p">)</span>
+        <span class="k">print</span><span class="p">(</span><span class="s1">&#39;len rp=&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">rp</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rpd</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">indices</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">columns</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Ws3d.show_segmentation"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.show_segmentation">[docs]</a>    <span class="k">def</span> <span class="nf">show_segmentation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">contrast_stretch</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">130</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Show segmentation on the maximum intensity projection or per z-slice</span>
+
+<span class="sd">        :param z: plot only this z</span>
+<span class="sd">        :param contrast_stretch: enhance contrast for better visibility</span>
+<span class="sd">        :param figsize: figure size</span>
+<span class="sd">        :param seed:  seed for the random color map</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;do not have cell positions, run segment first&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">figsize</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">figsize</span> <span class="o">=</span> <span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">12</span><span class="p">)</span>
+        <span class="c1"># self.grid_plot(self.image_stack,  z=z, contrast_stretch=contrast_stretch, figsize=figsize)</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="n">figsize</span><span class="p">)</span>
+
+        <span class="c1"># show seeds on the original image</span>
+        <span class="k">if</span> <span class="n">z</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="c1"># plot the maximum intensity projection</span>
+            <span class="n">mip</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">mip</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="p">[</span><span class="n">z</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">contrast_stretch</span><span class="p">:</span>
+            <span class="n">ax</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">_contrast_stretch</span><span class="p">(</span><span class="n">mip</span><span class="p">),</span> <span class="n">cmap</span><span class="o">=</span><span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">viridis</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ax</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">mip</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">viridis</span><span class="p">)</span>
+
+        <span class="n">ax</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;maximum intensity projection&#39;</span><span class="p">)</span>
+        <span class="n">ax</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="s1">&#39;xr&#39;</span><span class="p">)</span>
+        <span class="n">ax</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">()</span> <span class="o">-</span> <span class="mi">20</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">+</span> <span class="mi">20</span><span class="p">)</span>
+        <span class="n">ax</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">()</span> <span class="o">-</span> <span class="mi">20</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">+</span> <span class="mi">20</span><span class="p">)</span>
+
+        <span class="c1"># show watershed. Do it on the dataframe since may have deleted cells</span>
+        <span class="k">if</span> <span class="n">z</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">ax</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span> <span class="n">cmap</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">myrandom_cmap</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ax</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="p">[</span><span class="n">z</span><span class="p">],</span> <span class="n">cmap</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">myrandom_cmap</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">))</span>
+        <span class="n">ax</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="s1">&#39;xr&#39;</span><span class="p">)</span>
+        <span class="n">ax</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">()</span> <span class="o">-</span> <span class="mi">20</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">+</span> <span class="mi">20</span><span class="p">)</span>
+        <span class="n">ax</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">()</span> <span class="o">-</span> <span class="mi">20</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">peaks</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">+</span> <span class="mi">20</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Ws3d.select_nuclei"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.select_nuclei">[docs]</a>    <span class="k">def</span> <span class="nf">select_nuclei</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">quantiles</span><span class="o">=</span><span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">],</span> <span class="n">cutoff</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">plot</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">130</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Select nuclei based on their size. Use quantiles or a hard cutoff. Cutoff overrides quantiles.</span>
+
+<span class="sd">        :param quantiles: Quantiles (default [0.1, 0.9]).</span>
+<span class="sd">        :param cutoff: [lower, upper] cutoff. If specified, overrides quantiles!</span>
+<span class="sd">        :param plot: plot distributions before and after</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">df</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span>
+        <span class="c1"># df_before = self.df</span>
+
+        <span class="k">if</span> <span class="n">cutoff</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">cutoff</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="k">print</span><span class="p">(</span><span class="s2">&quot;ERROR, len(cutoff) must be 2 (lower and upper cutoff).&quot;</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">good_nuclei</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">area</span> <span class="o">&gt;</span> <span class="n">cutoff</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">area</span> <span class="o">&lt;</span> <span class="n">cutoff</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+                <span class="c1"># self.df = self.df[(self.df.area &gt; cutoff[0]) &amp; (self.df.area &lt; cutoff[1])]</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">lims</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">area</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">quantiles</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">area</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">quantiles</span><span class="p">[</span><span class="mi">1</span><span class="p">])]</span>
+            <span class="n">good_nuclei</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">area</span> <span class="o">&gt;</span> <span class="n">lims</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">area</span> <span class="o">&lt;</span> <span class="n">lims</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="c1"># self.df = self.df[(self.df.area &gt; lims[0]) &amp; (self.df.area &lt; lims[1])]</span>
+
+        <span class="c1"># good nuclei is a Series, not a DataFrame</span>
+        <span class="n">good_nuclei</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="s1">&#39;good_nuclei&#39;</span>
+        <span class="c1"># check whether already exists</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="s1">&#39;good_nuclei&#39;</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">inplace</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span> <span class="c1"># does not exist</span>
+            <span class="k">pass</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">,</span> <span class="n">good_nuclei</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">plot</span><span class="p">:</span>
+            <span class="c1"># _, ax = plt.subplots()</span>
+
+            <span class="c1"># a_heights, a_bins = np.histogram(df_before.area, 50)</span>
+            <span class="c1"># b_heights, b_bins = np.histogram(self.df.area, bins=a_bins)</span>
+            <span class="c1">#</span>
+            <span class="c1"># width = (a_bins[1] - a_bins[0]) / 3</span>
+            <span class="c1">#</span>
+            <span class="c1"># ax.bar(a_bins[:-1], a_heights, width=width, facecolor=&#39;cornflowerblue&#39;)</span>
+            <span class="c1"># ax.bar(b_bins[:-1] + width, b_heights, width=width, facecolor=&#39;seagreen&#39;)</span>
+
+            <span class="c1"># df_before.hist(color=&#39;k&#39;, bins=50, alpha=0.6)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">suptitle</span><span class="p">(</span><span class="s1">&#39;before selection of nuclei&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">good_nuclei</span><span class="p">]</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">suptitle</span><span class="p">(</span><span class="s1">&#39;after selection of nuclei&#39;</span><span class="p">)</span>
+
+            <span class="n">_</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+            <span class="n">w2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>  <span class="c1"># note the copy here, otherwise next line also affects self.ws</span>
+            <span class="c1"># w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0 # set to 0</span>
+            <span class="n">w2</span><span class="p">[</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">in1d</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;good_nuclei&#39;</span><span class="p">]]</span><span class="o">.</span><span class="n">index</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="o">.</span><span class="n">shape</span><span class="p">)]</span> <span class="o">=</span> <span class="mi">0</span> <span class="c1"># set to 0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mask_selected</span> <span class="o">=</span> <span class="n">w2</span> <span class="o">&gt;</span> <span class="mi">0</span>
+            <span class="c1"># all elements that are NOT in the good nuclei</span>
+
+            <span class="c1"># show watershed after selections.</span>
+            <span class="k">if</span> <span class="n">z</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">w2</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span> <span class="n">cmap</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">myrandom_cmap</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">),</span> <span class="n">origin</span><span class="o">=</span><span class="s1">&#39;lower&#39;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">w2</span><span class="p">[</span><span class="n">z</span><span class="p">],</span> <span class="n">cmap</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">myrandom_cmap</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">),</span> <span class="n">origin</span><span class="o">=</span><span class="s1">&#39;lower&#39;</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;after selection of good nuclei&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Ws3d.apply_to_channels"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.apply_to_channels">[docs]</a>    <span class="k">def</span> <span class="nf">apply_to_channels</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="n">channel_id</span><span class="p">,</span> <span class="n">remove_background</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Apply nuclear marker to other channels.</span>
+
+<span class="sd">        :param filename:</span>
+<span class="sd">        :param channel_id: ID for this channel. Can be a number or a string, e.g. &#39;Sox17&#39;.</span>
+<span class="sd">        :param remove_background:</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ws</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="k">print</span><span class="p">(</span><span class="s1">&#39;ERROR: run segment first&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="n">im</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">remove_background</span><span class="p">:</span>
+            <span class="n">im</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">remove_background</span><span class="p">(</span><span class="n">im</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="n">im</span><span class="o">.</span><span class="n">shape</span>
+        <span class="c1"># self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)</span>
+        <span class="n">channel_df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_regionprops_to_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ws</span><span class="p">,</span> <span class="n">im</span><span class="p">)</span>
+        <span class="n">channel_df</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;area&#39;</span><span class="p">,</span> <span class="n">channel_id</span><span class="p">,</span> <span class="s1">&#39;mean_intensity&#39;</span><span class="p">,</span> <span class="s1">&#39;centroid&#39;</span><span class="p">]</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">channel_id</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">inplace</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>  <span class="c1"># does not exist</span>
+            <span class="k">pass</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">,</span> <span class="n">channel_df</span><span class="p">[</span><span class="n">channel_id</span><span class="p">]],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">channels_image</span><span class="p">[</span><span class="n">channel_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">im</span></div>
+
+<div class="viewcode-block" id="Ws3d.find_center_of_colony"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.find_center_of_colony">[docs]</a>    <span class="k">def</span> <span class="nf">find_center_of_colony</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        find center of mass</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">center</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">center_of_mass</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">image_stack</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="Ws3d.radial_intensity"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.radial_intensity">[docs]</a>    <span class="k">def</span> <span class="nf">radial_intensity</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel_id</span><span class="p">,</span> <span class="n">only_selected_nuclei</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">plot</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Get radial intensity either for all nuclei or only selected ones. This uses the pixel information,</span>
+<span class="sd">        not the segmentation.</span>
+
+<span class="sd">        :param channel_id:</span>
+<span class="sd">        :param only_selected_nuclei:</span>
+<span class="sd">        :param plot:</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channels_image</span><span class="p">[</span><span class="n">channel_id</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">only_selected_nuclei</span><span class="p">:</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_selected</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask</span>
+        <span class="n">data</span><span class="p">[</span><span class="o">~</span><span class="n">mask</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># set all False values to 0</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">indices</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>  <span class="c1"># note changed NON-inversion of x and y</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">x</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">center</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">center</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">)</span>
+        <span class="c1"># now make 3d</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">tile</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">tbin</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">bincount</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">data</span><span class="o">.</span><span class="n">ravel</span><span class="p">())</span>  <span class="c1"># bincount makes +1 counts</span>
+
+        <span class="k">if</span> <span class="n">mask</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">nr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">bincount</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">ravel</span><span class="p">())</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">nr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">bincount</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">ravel</span><span class="p">(),</span> <span class="n">mask</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">)</span><span class="o">.</span><span class="n">ravel</span><span class="p">())</span>  <span class="c1"># this line makes the average, i.e. since</span>
+            <span class="c1"># we have</span>
+            <span class="c1"># more bins with certain r&#39;s, must divide by abundance. If have mask, some of those should not be</span>
+            <span class="c1"># counted, because they were set to zero above and should not contribute to the average.</span>
+        <span class="n">radialprofile</span> <span class="o">=</span> <span class="n">tbin</span> <span class="o">/</span> <span class="n">nr</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">radialprofile</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">print</span><span class="p">(</span><span class="s2">&quot;WARNING: there were empty bins, i.e. at some radii there seem to be no cells.&quot;</span><span class="p">)</span>
+            <span class="n">radialprofile</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">radialprofile</span><span class="p">)]</span> <span class="o">=</span> <span class="mf">0.</span>  <span class="c1"># set these to 0</span>
+
+        <span class="k">if</span> <span class="n">plot</span><span class="p">:</span>
+            <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">radialprofile</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">xy_scale</span><span class="p">,</span> <span class="n">radialprofile</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">([</span><span class="mf">0.</span><span class="p">,</span> <span class="n">ax</span><span class="o">.</span><span class="n">get_ylim</span><span class="p">()[</span><span class="mi">1</span><span class="p">]])</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">([</span><span class="mf">0.</span><span class="p">,</span> <span class="n">ax</span><span class="o">.</span><span class="n">get_xlim</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span><span class="o">/</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span><span class="p">)])</span>  <span class="c1"># plot sqrt(2) less far because this is in the corners</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;distance ($\mu m$)&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fontsize</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">channel_id</span><span class="p">)</span> <span class="o">+</span> <span class="s1">&#39; intensity&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fontsize</span><span class="p">)</span>
+            <span class="c1"># where there is no colony anyway</span>
+            <span class="n">nice_spines</span><span class="p">(</span><span class="n">ax</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">radialprofile</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">xy_scale</span><span class="p">,</span> <span class="n">radialprofile</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_indices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">only_selected_cells</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">only_selected_cells</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">good_nuclei</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">index</span>  <span class="c1"># all</span>
+
+<div class="viewcode-block" id="Ws3d.dot_plot"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.dot_plot">[docs]</a>    <span class="k">def</span> <span class="nf">dot_plot</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel_id</span><span class="p">,</span> <span class="n">colormap_cutoff</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">only_selected_cells</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Dot-plot as in Warmflash et al.</span>
+
+<span class="sd">        :param channel_id:</span>
+<span class="sd">        :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.</span>
+<span class="sd">        :param only_selected_cells:</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_indices</span><span class="p">(</span><span class="n">only_selected_cells</span><span class="p">)</span>
+
+        <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+        <span class="n">cax</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">centroid</span><span class="p">[</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">flat</span><span class="p">)[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">centroid</span><span class="p">[</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">flat</span><span class="p">)[:,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">c</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span><span class="n">channel_id</span><span class="p">][</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">,</span>
+                         <span class="n">s</span><span class="o">=</span><span class="mi">40</span><span class="p">,</span> <span class="n">edgecolors</span><span class="o">=</span><span class="s1">&#39;none&#39;</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">viridis</span><span class="p">,</span> <span class="n">vmax</span><span class="o">=</span><span class="n">colormap_cutoff</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span>
+                <span class="n">channel_id</span><span class="p">][</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+        <span class="n">nice_spines</span><span class="p">(</span><span class="n">ax</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">autoscale</span><span class="p">(</span><span class="n">tight</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_aspect</span><span class="p">(</span><span class="s1">&#39;equal&#39;</span><span class="p">)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">cax</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Ws3d.copy_data_to_clipboard"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.copy_data_to_clipboard">[docs]</a>    <span class="k">def</span> <span class="nf">copy_data_to_clipboard</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        copy data to clipboard</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">to_clipboard</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Ws3d.radial_profile_per_cell"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.radial_profile_per_cell">[docs]</a>    <span class="k">def</span> <span class="nf">radial_profile_per_cell</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel_id</span><span class="p">,</span> <span class="n">nbins</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">plot</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">only_selected_cells</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">        :param channel_id:</span>
+<span class="sd">        :param nbins: number of bins</span>
+<span class="sd">        :param plot:</span>
+<span class="sd">        :param only_selected_cells:</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_indices</span><span class="p">(</span><span class="n">only_selected_cells</span><span class="p">)</span>
+
+        <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">centroid</span><span class="p">[</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">flat</span><span class="p">)[:,</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">centroid</span><span class="p">[</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">flat</span><span class="p">)[:,</span> <span class="mi">2</span><span class="p">]</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span><span class="n">channel_id</span><span class="p">][</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+
+        <span class="n">r</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">x</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">center</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="o">**</span><span class="mi">2</span><span class="o">+</span><span class="p">(</span><span class="n">y</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">center</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+        <span class="c1"># r = np.round(r).astype(np.int)</span>
+
+        <span class="c1"># n = np.bincount(r, i)</span>
+        <span class="c1"># n2 = np.bincount(r)</span>
+        <span class="c1"># xn = np.arange(r.min(),r.max())</span>
+        <span class="n">n</span><span class="p">,</span> <span class="n">xn</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">nbins</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">i</span><span class="p">)</span>
+        <span class="n">n2</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">nbins</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">plot</span><span class="p">:</span>
+            <span class="n">_</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">xn</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">xn</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">n</span><span class="o">/</span><span class="n">n2</span><span class="p">,</span> <span class="n">where</span><span class="o">=</span><span class="s1">&#39;mid&#39;</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">fill_between</span><span class="p">(</span><span class="n">xn</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">xn</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">n</span><span class="o">/</span><span class="n">n2</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="s1">&#39;mid&#39;</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fontsize</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="n">channel_id</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fontsize</span><span class="p">)</span>
+            <span class="c1"># ax.set_xlim([0, ax.get_xlim()[1]])</span>
+            <span class="n">nice_spines</span><span class="p">(</span><span class="n">ax</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">xn</span><span class="p">,</span> <span class="n">n</span><span class="o">/</span><span class="n">n2</span></div>
+
+<div class="viewcode-block" id="Ws3d.coexpression_per_cell"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.coexpression_per_cell">[docs]</a>    <span class="k">def</span> <span class="nf">coexpression_per_cell</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel_id1</span><span class="p">,</span> <span class="n">channel_id2</span><span class="p">,</span> <span class="n">only_selected_cells</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.</span>
+
+<span class="sd">        :param channel_id1:</span>
+<span class="sd">        :param channel_id2:</span>
+<span class="sd">        :param only_selected_cells:</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_indices</span><span class="p">(</span><span class="n">only_selected_cells</span><span class="p">)</span>
+
+        <span class="n">ch1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span><span class="n">channel_id1</span><span class="p">][</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+        <span class="n">ch2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">df</span><span class="p">[</span><span class="n">channel_id2</span><span class="p">][</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+
+        <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">ch1</span><span class="p">,</span> <span class="n">ch2</span><span class="p">,</span> <span class="n">edgecolors</span><span class="o">=</span><span class="s1">&#39;none&#39;</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="n">ch1</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fontsize</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="n">ch2</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">fontsize</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">autoscale</span><span class="p">(</span><span class="n">tight</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Ws3d.coexpression_per_pixel"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.coexpression_per_pixel">[docs]</a>    <span class="k">def</span> <span class="nf">coexpression_per_pixel</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel_id1</span><span class="p">,</span> <span class="n">channel_id2</span><span class="p">,</span> <span class="n">downsample</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">only_selected_cells</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one nuclear pixel.</span>
+
+<span class="sd">        :param channel_id1:</span>
+<span class="sd">        :param channel_id2:</span>
+<span class="sd">        :param downsample: Usually have a lot of point, so can only use ever downsample&#39;th point.</span>
+<span class="sd">        :param only_selected_cells:</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">ch1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channels_image</span><span class="p">[</span><span class="n">channel_id1</span><span class="p">]</span>
+        <span class="n">ch2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">channels_image</span><span class="p">[</span><span class="n">channel_id2</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">only_selected_cells</span><span class="p">:</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask_selected</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mask</span>
+
+        <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">ch1</span><span class="p">[</span><span class="n">mask</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">][::</span><span class="mi">10</span><span class="p">],</span> <span class="n">ch2</span><span class="p">[</span><span class="n">mask</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">][::</span><span class="n">downsample</span><span class="p">],</span> <span class="n">marker</span><span class="o">=</span><span class="s1">&#39;o&#39;</span><span class="p">,</span> <span class="n">edgecolors</span><span class="o">=</span><span class="s1">&#39;none&#39;</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span>
+                   <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+        <span class="n">nice_spines</span><span class="p">(</span><span class="n">ax</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">autoscale</span><span class="p">(</span><span class="n">tight</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="n">channel_id1</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="n">channel_id2</span><span class="p">)</span></div>
+
+    <span class="c1"># static methods</span>
+    <span class="nd">@staticmethod</span>
+<div class="viewcode-block" id="Ws3d.remove_background"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.remove_background">[docs]</a>    <span class="k">def</span> <span class="nf">remove_background</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        basic method to remove background, returns background subtracted image</span>
+
+<span class="sd">        :param im: image</span>
+<span class="sd">        :param n: lowest non-zero n pixels are used to estimate background</span>
+<span class="sd">        :return: background subtracted image</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">imm</span> <span class="o">=</span> <span class="n">im</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="c1"># following in comments has a bug</span>
+        <span class="c1"># im -= np.partition(imm[imm.nonzero()], n)[:n].mean().astype(im.dtype)</span>
+        <span class="c1"># im[im&lt;0.] = 0.  # set negatives to 0</span>
+        <span class="c1"># return im</span>
+        <span class="k">return</span> <span class="n">im</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">partition</span><span class="p">(</span><span class="n">imm</span><span class="p">[</span><span class="n">imm</span><span class="o">.</span><span class="n">nonzero</span><span class="p">()],</span> <span class="n">n</span><span class="p">)[:</span><span class="n">n</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span></div>
+
+    <span class="nd">@staticmethod</span>
+<div class="viewcode-block" id="Ws3d.myrandom_cmap"><a class="viewcode-back" href="../functions.html#watershed3d.Ws3d.myrandom_cmap">[docs]</a>    <span class="k">def</span> <span class="nf">myrandom_cmap</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">return_darker</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1024</span><span class="p">):</span>
+
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        make random colormap, good for plotting segmentation</span>
+
+<span class="sd">        :param seed: seed for random colormap</span>
+<span class="sd">        :param return_darker: also return a darker version</span>
+<span class="sd">        :param n: number of colors</span>
+<span class="sd">        :return: colormap(s)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+        <span class="n">random_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="n">random_array</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="mf">1.</span>
+        <span class="n">random_array2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+        <span class="n">random_array2</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">random_array</span>
+        <span class="n">random_array2</span><span class="p">[:,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="o">.</span><span class="mi">8</span>
+
+        <span class="k">if</span> <span class="n">return_darker</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">mpl</span><span class="o">.</span><span class="n">colors</span><span class="o">.</span><span class="n">ListedColormap</span><span class="p">(</span><span class="n">random_array</span><span class="p">),</span> <span class="n">mpl</span><span class="o">.</span><span class="n">colors</span><span class="o">.</span><span class="n">ListedColormap</span><span class="p">(</span><span class="n">random_array2</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">mpl</span><span class="o">.</span><span class="n">colors</span><span class="o">.</span><span class="n">ListedColormap</span><span class="p">(</span><span class="n">random_array</span><span class="p">)</span></div></div>
+
+
+<span class="k">def</span> <span class="nf">nice_spines</span><span class="p">(</span><span class="n">ax</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">grid</span><span class="p">)</span>
+    <span class="n">gridlines</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">get_xgridlines</span><span class="p">()</span> <span class="o">+</span> <span class="n">ax</span><span class="o">.</span><span class="n">get_ygridlines</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">gridlines</span><span class="p">:</span>
+        <span class="n">line</span><span class="o">.</span><span class="n">set_linestyle</span><span class="p">(</span><span class="s1">&#39;-&#39;</span><span class="p">)</span>
+        <span class="n">line</span><span class="o">.</span><span class="n">set_linewidth</span><span class="p">(</span><span class="o">.</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">spines_to_remove</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;top&#39;</span><span class="p">,</span> <span class="s1">&#39;right&#39;</span><span class="p">]</span>
+    <span class="n">spines_to_keep</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;bottom&#39;</span><span class="p">,</span> <span class="s1">&#39;left&#39;</span><span class="p">]</span>
+    <span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;xtick.direction&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;out&#39;</span>
+    <span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;ytick.direction&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;out&#39;</span>
+    <span class="n">almost_black</span> <span class="o">=</span> <span class="s1">&#39;#262626&#39;</span>
+
+    <span class="k">for</span> <span class="n">spine</span> <span class="ow">in</span> <span class="n">spines_to_remove</span><span class="p">:</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">spines</span><span class="p">[</span><span class="n">spine</span><span class="p">]</span><span class="o">.</span><span class="n">set_visible</span><span class="p">(</span><span class="bp">False</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">xaxis</span><span class="o">.</span><span class="n">set_ticks_position</span><span class="p">(</span><span class="s1">&#39;bottom&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">yaxis</span><span class="o">.</span><span class="n">set_ticks_position</span><span class="p">(</span><span class="s1">&#39;left&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">spine</span> <span class="ow">in</span> <span class="n">spines_to_keep</span><span class="p">:</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">spines</span><span class="p">[</span><span class="n">spine</span><span class="p">]</span><span class="o">.</span><span class="n">set_linewidth</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">spines</span><span class="p">[</span><span class="n">spine</span><span class="p">]</span><span class="o">.</span><span class="n">set_color</span><span class="p">(</span><span class="n">almost_black</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_contrast_stretch</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">percentile</span><span class="o">=</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">98</span><span class="p">)):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Stretch the contrast of an image to within given percentiles.</span>
+
+<span class="sd">    :param img: Input image</span>
+<span class="sd">    :param percentile: (lower percentile, upper percentile)</span>
+<span class="sd">    :return: contrast stretched image</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">p2</span><span class="p">,</span> <span class="n">p98</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">percentile</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">skimage</span><span class="o">.</span><span class="n">exposure</span><span class="o">.</span><span class="n">rescale_intensity</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">in_range</span><span class="o">=</span><span class="p">(</span><span class="n">p2</span><span class="p">,</span> <span class="n">p98</span><span class="p">))</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2016, Jakob Metzger.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.4.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.8</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

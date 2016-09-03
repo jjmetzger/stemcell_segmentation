@@ -1,0 +1,420 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>List of functions &mdash; Stemcell Segmentation 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="top" title="Stemcell Segmentation 0.1 documentation" href="index.html" />
+    <link rel="prev" title="Workflow" href="intro.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head>
+  <body role="document">
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="list-of-functions">
+<h1>List of functions<a class="headerlink" href="#list-of-functions" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="watershed3d">
+<h2>Watershed3d<a class="headerlink" href="#watershed3d" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="watershed3d.Ws3d">
+<em class="property">class </em><code class="descclassname">watershed3d.</code><code class="descname">Ws3d</code><span class="sig-paren">(</span><em>imagefile</em>, <em>xy_scale=1.0</em>, <em>z_scale=1.5</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d" title="Permalink to this definition">¶</a></dt>
+<dd><p>Main watershed 3d class. Takes an image file and expects a _Probabillites.h5 file from Ilastik. If there is an
+object classifier from Ilastik, uses this for seeding. Otherwise tries to guess blobs for seeding.</p>
+<dl class="method">
+<dt id="watershed3d.Ws3d.apply_to_channels">
+<code class="descname">apply_to_channels</code><span class="sig-paren">(</span><em>filename</em>, <em>channel_id</em>, <em>remove_background=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.apply_to_channels"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.apply_to_channels" title="Permalink to this definition">¶</a></dt>
+<dd><p>Apply nuclear marker to other channels.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>filename</strong> &#8211; </li>
+<li><strong>channel_id</strong> &#8211; ID for this channel. Can be a number or a string, e.g. &#8216;Sox17&#8217;.</li>
+<li><strong>remove_background</strong> &#8211; </li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.coexpression_per_cell">
+<code class="descname">coexpression_per_cell</code><span class="sig-paren">(</span><em>channel_id1</em>, <em>channel_id2</em>, <em>only_selected_cells=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.coexpression_per_cell"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.coexpression_per_cell" title="Permalink to this definition">¶</a></dt>
+<dd><p>Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>channel_id1</strong> &#8211; </li>
+<li><strong>channel_id2</strong> &#8211; </li>
+<li><strong>only_selected_cells</strong> &#8211; </li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.coexpression_per_pixel">
+<code class="descname">coexpression_per_pixel</code><span class="sig-paren">(</span><em>channel_id1</em>, <em>channel_id2</em>, <em>downsample=10</em>, <em>only_selected_cells=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.coexpression_per_pixel"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.coexpression_per_pixel" title="Permalink to this definition">¶</a></dt>
+<dd><p>Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one nuclear pixel.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>channel_id1</strong> &#8211; </li>
+<li><strong>channel_id2</strong> &#8211; </li>
+<li><strong>downsample</strong> &#8211; Usually have a lot of point, so can only use ever downsample&#8217;th point.</li>
+<li><strong>only_selected_cells</strong> &#8211; </li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.copy_data_to_clipboard">
+<code class="descname">copy_data_to_clipboard</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.copy_data_to_clipboard"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.copy_data_to_clipboard" title="Permalink to this definition">¶</a></dt>
+<dd><p>copy data to clipboard</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.dot_plot">
+<code class="descname">dot_plot</code><span class="sig-paren">(</span><em>channel_id</em>, <em>colormap_cutoff=0.5</em>, <em>only_selected_cells=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.dot_plot"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.dot_plot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Dot-plot as in Warmflash et al.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>channel_id</strong> &#8211; </li>
+<li><strong>colormap_cutoff</strong> &#8211; percentage of maximum for cutoff. Makes smaller differences more visible.</li>
+<li><strong>only_selected_cells</strong> &#8211; </li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.filter_probability_map">
+<code class="descname">filter_probability_map</code><span class="sig-paren">(</span><em>sigma=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.filter_probability_map"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.filter_probability_map" title="Permalink to this definition">¶</a></dt>
+<dd><p>Filter the probability map using a gaussian filter. Use the dimensions provided.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>sigma</strong> &#8211; Width of the gaussian filter. Needs to have len(sigma) == 3.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">filtered probability map</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.find_center_of_colony">
+<code class="descname">find_center_of_colony</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.find_center_of_colony"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.find_center_of_colony" title="Permalink to this definition">¶</a></dt>
+<dd><p>find center of mass</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.grid_plot">
+<code class="descname">grid_plot</code><span class="sig-paren">(</span><em>image_to_plot</em>, <em>z=None</em>, <em>contrast_stretch=False</em>, <em>figsize=None</em>, <em>cmap=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.grid_plot"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.grid_plot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plot all z-slices</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>image_to_plot</strong> &#8211; </li>
+<li><strong>z</strong> &#8211; can select a specific z to plot</li>
+<li><strong>contrast_stretch</strong> &#8211; enhance contrast</li>
+<li><strong>figsize</strong> &#8211; set the size of the figure when plotting a single z-slice, default is (10,10)</li>
+<li><strong>cmap</strong> &#8211; colormap</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.load_mask">
+<code class="descname">load_mask</code><span class="sig-paren">(</span><em>prob=0.5</em>, <em>foreground_index=1</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.load_mask"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.load_mask" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load the probability mask and object prediction if it exists.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>prob</strong> &#8211; Set the probability for which</li>
+<li><strong>foreground_index</strong> &#8211; Set the index that contains the foreground (i.e. did you use the first or the second label in Ilastik for the background? Default is that the first label (i.e. 0) is background and 1 corresponds to foreground.</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="staticmethod">
+<dt id="watershed3d.Ws3d.myrandom_cmap">
+<em class="property">static </em><code class="descname">myrandom_cmap</code><span class="sig-paren">(</span><em>seed=None</em>, <em>return_darker=False</em>, <em>n=1024</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.myrandom_cmap"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.myrandom_cmap" title="Permalink to this definition">¶</a></dt>
+<dd><p>make random colormap, good for plotting segmentation</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>seed</strong> &#8211; seed for random colormap</li>
+<li><strong>return_darker</strong> &#8211; also return a darker version</li>
+<li><strong>n</strong> &#8211; number of colors</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">colormap(s)</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.radial_intensity">
+<code class="descname">radial_intensity</code><span class="sig-paren">(</span><em>channel_id</em>, <em>only_selected_nuclei=False</em>, <em>plot=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.radial_intensity"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.radial_intensity" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get radial intensity either for all nuclei or only selected ones. This uses the pixel information,
+not the segmentation.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>channel_id</strong> &#8211; </li>
+<li><strong>only_selected_nuclei</strong> &#8211; </li>
+<li><strong>plot</strong> &#8211; </li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.radial_profile_per_cell">
+<code class="descname">radial_profile_per_cell</code><span class="sig-paren">(</span><em>channel_id</em>, <em>nbins=30</em>, <em>plot=True</em>, <em>only_selected_cells=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.radial_profile_per_cell"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.radial_profile_per_cell" title="Permalink to this definition">¶</a></dt>
+<dd><table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>channel_id</strong> &#8211; </li>
+<li><strong>nbins</strong> &#8211; number of bins</li>
+<li><strong>plot</strong> &#8211; </li>
+<li><strong>only_selected_cells</strong> &#8211; </li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="staticmethod">
+<dt id="watershed3d.Ws3d.remove_background">
+<em class="property">static </em><code class="descname">remove_background</code><span class="sig-paren">(</span><em>im</em>, <em>n=1000</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.remove_background"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.remove_background" title="Permalink to this definition">¶</a></dt>
+<dd><p>basic method to remove background, returns background subtracted image</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>im</strong> &#8211; image</li>
+<li><strong>n</strong> &#8211; lowest non-zero n pixels are used to estimate background</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">background subtracted image</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.segment">
+<code class="descname">segment</code><span class="sig-paren">(</span><em>min_distance=2</em>, <em>sigma=(2</em>, <em>2</em>, <em>6)</em>, <em>do_not_use_object_classifier=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.segment"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.segment" title="Permalink to this definition">¶</a></dt>
+<dd><p>Segment the image.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>min_distance</strong> &#8211; </li>
+<li><strong>sigma</strong> &#8211; </li>
+<li><strong>do_not_use_object_classifier</strong> &#8211; </li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.select_nuclei">
+<code class="descname">select_nuclei</code><span class="sig-paren">(</span><em>quantiles=[0.1, 0.9], cutoff=None, plot=True, z=None, seed=130</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.select_nuclei"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.select_nuclei" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select nuclei based on their size. Use quantiles or a hard cutoff. Cutoff overrides quantiles.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>quantiles</strong> &#8211; Quantiles (default [0.1, 0.9]).</li>
+<li><strong>cutoff</strong> &#8211; [lower, upper] cutoff. If specified, overrides quantiles!</li>
+<li><strong>plot</strong> &#8211; plot distributions before and after</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="watershed3d.Ws3d.show_segmentation">
+<code class="descname">show_segmentation</code><span class="sig-paren">(</span><em>z=None</em>, <em>contrast_stretch=True</em>, <em>figsize=None</em>, <em>seed=130</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/watershed3d.html#Ws3d.show_segmentation"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#watershed3d.Ws3d.show_segmentation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show segmentation on the maximum intensity projection or per z-slice</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>z</strong> &#8211; plot only this z</li>
+<li><strong>contrast_stretch</strong> &#8211; enhance contrast for better visibility</li>
+<li><strong>figsize</strong> &#8211; figure size</li>
+<li><strong>seed</strong> &#8211; seed for the random color map</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">List of functions</a><ul>
+<li><a class="reference internal" href="#watershed3d">Watershed3d</a></li>
+</ul>
+</li>
+</ul>
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="intro.html" title="previous chapter">Workflow</a></li>
+  </ul></li>
+</ul>
+</div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/functions.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2016, Jakob Metzger.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.4.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.8</a>
+      
+      |
+      <a href="_sources/functions.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
