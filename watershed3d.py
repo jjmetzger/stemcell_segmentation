@@ -42,10 +42,22 @@ class Ws3d(object):
         self.fontsize = 16
         self.filename = imagefile
         self.image_stack = io.imread(imagefile)
-        self.z_size, self.x_size, self.y_size = self.image_stack.shape
+        self.image_dim = self.image_stack.ndim
+        if self.image_dim == 2:
+            print('image is two-dimensional')
+            self.x_size, self.y_size = self.image_stack.shape
+            self.z_size, self.z_scale = None, None
+
+        elif self.image_dim == 3:
+            print('image is three-dimensional')
+            self.z_size, self.x_size, self.y_size = self.image_stack.shape
+            if self.z_size > self.x_size or self.z_size > self.y_size:
+                raise RuntimeError("ERROR: z must be the first and smallest dimension")
+                self.z_scale = z_scale
+        else:
+            raise RuntimeError("Image is neither 2 or 3 dimensional")
 
         self.xy_scale = xy_scale
-        self.z_scale = z_scale
 
         self.peaks = None
         self.peak_array = None
@@ -82,8 +94,14 @@ class Ws3d(object):
         :param foreground_index: Set the index that contains the foreground (i.e. did you use the first or the second label in Ilastik for the background? Default is that the first label (i.e. 0) is background and 1 corresponds to foreground.
         """
 
-        with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
-            self.probability_map = h['exported_data'][:][:, :, :, foreground_index]  # index 1 is the nuclei
+        if self.image_dim == 2:
+            with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
+                self.probability_map = h['exported_data'][:][:, :, :, foreground_index]  # index 1 is the nuclei
+        elif self.image_dim == 3:
+            with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
+                self.probability_map = h['exported_data'][:][:, :, foreground_index]  # index 1 is the nuclei
+        else:
+            raise RuntimeError
 
         print("shape", self.probability_map.shape, self.image_stack.shape)
         if not self.probability_map.shape == self.image_stack.shape:
@@ -95,10 +113,13 @@ class Ws3d(object):
         # self.probability_map[self.probability_map < prob] = 0.
 
         # load object prediction if there
-        if self.have_op:
-            with h5py.File(re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE), 'r') as h:
-                self.op = np.swapaxes(np.squeeze(h['exported_data']), 2, 0)  # object prediction
-            print('loaded object prediction')
+        if self.image_dim == 3:
+            if self.have_op:
+                with h5py.File(re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE), 'r') as h:
+                    self.op = np.swapaxes(np.squeeze(h['exported_data']), 2, 0)  # object prediction
+                print('loaded object prediction')
+        else:
+            raise NotImplementedError("not implemented for 2d")
 
     def plot_probability_map(self, z=None, contrast_stretch=False, figsize=None):
 
@@ -113,55 +134,68 @@ class Ws3d(object):
         Plot all z-slices
 
         :param image_to_plot:
-        :param z: can select a specific z to plot
+        :param z: can select a specific z to plot. Ignore for 2D
         :param contrast_stretch: enhance contrast
         :param figsize: set the size of the figure when plotting a single z-slice, default is (10,10)
         :param cmap: colormap
         :return:
         """
 
-        try:
-            assert image_to_plot.ndim == 3
-        except AssertionError:
-            print('Error: image to plot must be a z-stack, i.e. must have dimension .ndim == 3')
-            return
-        except AttributeError:
-            print('Error: image to plot is not in the correct format - needs to be a numpy array.')
-            return
+        # try:
+        #     assert image_to_plot.ndim == 3
+        # except AssertionError:
+        #     print('Error: image to plot must be a z-stack, i.e. must have dimension .ndim == 3')
+        #     return
+        # except AttributeError:
+        #     print('Error: image to plot is not in the correct format - needs to be a numpy array.')
+        #     return
+
+        if z is not None and image_to_plot.ndim != 2:
+            print("Warning: Gave z-information but only have 2d image")
+            z = None
 
         if cmap is None:
             cmap = plt.cm.plasma
         # cmap = plt.cm.Greys
         if figsize is None:
             figsize = (10, 10)
-        if z is not None:
+
+        if image_to_plot.ndim == 2:
             fig, axes = plt.subplots(figsize=figsize)
             if contrast_stretch:
-                axes.imshow(_contrast_stretch(image_to_plot[z]), cmap=cmap)
+                axes.imshow(self._contrast_stretch(image_to_plot), cmap=cmap)
             else:
-                ax = axes.imshow(image_to_plot[z], interpolation='None', cmap=cmap)
-                ax.set_clim(0, image_to_plot[z].max())
-        else:
+                axes.imshow(image_to_plot, interpolation='None', cmap=cmap)
+        else:  #3d
 
-            nrows = np.int(np.ceil(np.sqrt(self.z_size)))
-            ncols = np.int(self.z_size // nrows + 1)
-
-            fig, axes = plt.subplots(nrows, ncols, figsize=(3 * ncols, 3 * nrows))
-            for n in range(self.z_size):
-                i = n // ncols
-                j = n % ncols
-
+            if z is not None:
+                fig, axes = plt.subplots(figsize=figsize)
                 if contrast_stretch:
-                    axes[i, j].imshow(_contrast_stretch(image_to_plot[n]), interpolation='None', cmap=cmap)
+                    axes.imshow(self._contrast_stretch(image_to_plot[z]), cmap=cmap)
                 else:
-                    ax = axes[i, j].imshow(image_to_plot[n], interpolation='None', cmap=cmap)
-                    ax.set_clim(0, image_to_plot.max())
+                    ax = axes.imshow(image_to_plot[z], interpolation='None', cmap=cmap)
+                    ax.set_clim(0, image_to_plot[z].max())
+            else:
 
-            # Remove empty plots
-            for ax in axes.ravel():
-                if not (len(ax.images)):
-                    fig.delaxes(ax)
-            fig.tight_layout()
+                nrows = np.int(np.ceil(np.sqrt(self.z_size)))
+                ncols = np.int(self.z_size // nrows + 1)
+
+                fig, axes = plt.subplots(nrows, ncols, figsize=(3 * ncols, 3 * nrows))
+                for n in range(self.z_size):
+                    i = n // ncols
+                    j = n % ncols
+
+                    if contrast_stretch:
+                        axes[i, j].imshow(self._contrast_stretch(image_to_plot[n]), interpolation='None', cmap=cmap)
+                    else:
+                        ax = axes[i, j].imshow(image_to_plot[n], interpolation='None', cmap=cmap)
+                        ax.set_clim(0, image_to_plot.max())
+
+                # Remove empty plots
+                for ax in axes.ravel():
+                    if not (len(ax.images)):
+                        fig.delaxes(ax)
+                fig.tight_layout()
 
     def intensity_histogram(self):
 
@@ -183,14 +217,28 @@ class Ws3d(object):
         :return: filtered probability map
         """
 
-        try:
-            assert len(sigma) == 3
-        except AssertionError:
-            print('sigma needs to have 3 elements for the three dimensions.')
-            return
-        except TypeError:
-            print('setting sigma to default (2, 6, 6)')
-            sigma = (2, 6, 6)
+        if self.image_dim == 3:
+            try:
+                assert len(sigma) == 3
+            except AssertionError:
+                print('sigma needs to have 3 elements for the three dimensions.')
+                return
+            except TypeError:  # None
+                print('setting sigma to default (2, 6, 6)')
+                sigma = (2, 6, 6)
+
+        elif self.image_dim == 2:
+            try:
+                assert len(sigma) == 2
+            except AssertionError:
+                print('sigma needs to have 2 elements for the two dimensions.')
+                return
+            except TypeError:  # None
+                print('setting sigma to default (6, 6)')
+                sigma = (6, 6)
+
+        else:
+            raise RuntimeError('wrong dimensions')
 
         pm = self.probability_map.copy()
         print(pm.shape)
@@ -292,7 +340,7 @@ class Ws3d(object):
         else:
             mip = self.image_stack[z]
         if contrast_stretch:
-            ax[0].imshow(_contrast_stretch(mip), cmap=plt.cm.viridis)
+            ax[0].imshow(self._contrast_stretch(mip), cmap=plt.cm.viridis)
         else:
             ax[0].imshow(mip, cmap=plt.cm.viridis)
 
@@ -458,7 +506,7 @@ class Ws3d(object):
             ax.set_xlabel('distance ($\mu m$)', fontsize=self.fontsize)
             ax.set_ylabel(str(channel_id) + ' intensity', fontsize=self.fontsize)
             # where there is no colony anyway
-            nice_spines(ax)
+            self.nice_spines(ax)
 
         return np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile
 
@@ -485,7 +533,7 @@ class Ws3d(object):
             self.df.centroid[index].values.flat)[:, 2], c=self.df[channel_id][index].values,
                          s=40, edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*self.df[
                 channel_id][index].values.max())
-        nice_spines(ax)
+        self.nice_spines(ax)
         ax.autoscale(tight=1)
         ax.set_aspect('equal')
         fig.colorbar(cax)
@@ -528,7 +576,7 @@ class Ws3d(object):
             ax.set_xlabel('r', fontsize=self.fontsize)
             ax.set_ylabel(channel_id, fontsize=self.fontsize)
             # ax.set_xlim([0, ax.get_xlim()[1]])
-            nice_spines(ax)
+            self.nice_spines(ax)
         return xn, n/n2
 
     def coexpression_per_cell(self, channel_id1, channel_id2, only_selected_cells=False):
@@ -548,8 +596,9 @@ class Ws3d(object):
 
         fig, ax = plt.subplots()
         ax.scatter(ch1, ch2, edgecolors='none', c='k', alpha=0.8)
-        ax.set_xlabel(ch1, fontsize=self.fontsize)
-        ax.set_ylabel(ch2, fontsize=self.fontsize)
+        self.nice_spines(ax)
+        ax.set_xlabel(channel_id1, fontsize=self.fontsize)
+        ax.set_ylabel(channel_id2, fontsize=self.fontsize)
         ax.autoscale(tight=1)
 
     def coexpression_per_pixel(self, channel_id1, channel_id2, downsample=10, only_selected_cells=False):
@@ -573,12 +622,12 @@ class Ws3d(object):
             mask = self.mask
 
         fig, ax = plt.subplots()
-        ax.scatter(ch1[mask > 0][::10], ch2[mask > 0][::downsample], marker='o', edgecolors='none', c='k',
+        ax.scatter(ch1[mask > 0][::downsample], ch2[mask > 0][::downsample], marker='o', edgecolors='none', c='k',
                    alpha=0.8, s=4)
-        nice_spines(ax)
+        self.nice_spines(ax)
+        ax.set_xlabel(channel_id1, fontsize=self.fontsize)
+        ax.set_ylabel(channel_id2, fontsize=self.fontsize)
         ax.autoscale(tight=1)
-        ax.set_xlabel(channel_id1)
-        ax.set_ylabel(channel_id2)
 
     # static methods
     @staticmethod
@@ -620,37 +669,37 @@ class Ws3d(object):
         else:
             return mpl.colors.ListedColormap(random_array)
 
+    @staticmethod
+    def nice_spines(ax, grid=True):
 
-def nice_spines(ax, grid=True):
+        ax.grid(grid)
+        gridlines = ax.get_xgridlines() + ax.get_ygridlines()
+        for line in gridlines:
+            line.set_linestyle('-')
+            line.set_linewidth(.1)
 
-    ax.grid(grid)
-    gridlines = ax.get_xgridlines() + ax.get_ygridlines()
-    for line in gridlines:
-        line.set_linestyle('-')
-        line.set_linewidth(.1)
+        spines_to_remove = ['top', 'right']
+        spines_to_keep = ['bottom', 'left']
+        rcParams['xtick.direction'] = 'out'
+        rcParams['ytick.direction'] = 'out'
+        almost_black = '#262626'
 
-    spines_to_remove = ['top', 'right']
-    spines_to_keep = ['bottom', 'left']
-    rcParams['xtick.direction'] = 'out'
-    rcParams['ytick.direction'] = 'out'
-    almost_black = '#262626'
+        for spine in spines_to_remove:
+            ax.spines[spine].set_visible(False)
+        ax.xaxis.set_ticks_position('bottom')
+        ax.yaxis.set_ticks_position('left')
+        for spine in spines_to_keep:
+            ax.spines[spine].set_linewidth(0.5)
+            ax.spines[spine].set_color(almost_black)
 
-    for spine in spines_to_remove:
-        ax.spines[spine].set_visible(False)
-    ax.xaxis.set_ticks_position('bottom')
-    ax.yaxis.set_ticks_position('left')
-    for spine in spines_to_keep:
-        ax.spines[spine].set_linewidth(0.5)
-        ax.spines[spine].set_color(almost_black)
+    @staticmethod
+    def _contrast_stretch(img, percentile=(2, 98)):
+        """
+        Stretch the contrast of an image to within given percentiles.
 
-
-def _contrast_stretch(img, percentile=(2, 98)):
-    """
-    Stretch the contrast of an image to within given percentiles.
-
-    :param img: Input image
-    :param percentile: (lower percentile, upper percentile)
-    :return: contrast stretched image
-    """
-    p2, p98 = np.percentile(img, percentile)
-    return skimage.exposure.rescale_intensity(img, in_range=(p2, p98))
+        :param img: Input image
+        :param percentile: (lower percentile, upper percentile)
+        :return: contrast stretched image
+        """
+        p2, p98 = np.percentile(img, percentile)
+        return skimage.exposure.rescale_intensity(img, in_range=(p2, p98))
