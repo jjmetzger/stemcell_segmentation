@@ -53,7 +53,7 @@ class Ws3d(object):
             self.z_size, self.x_size, self.y_size = self.image_stack.shape
             if self.z_size > self.x_size or self.z_size > self.y_size:
                 raise RuntimeError("ERROR: z must be the first and smallest dimension")
-                self.z_scale = z_scale
+            self.z_scale = z_scale
         else:
             raise RuntimeError("Image is neither 2 or 3 dimensional")
 
@@ -81,7 +81,7 @@ class Ws3d(object):
         self.have_op = True
 
         if not os.path.isfile(self.filename_op):
-            print('No object prediction file ({:s}) found - segmenting without.'.format(self.filename_op))
+            # print('No object prediction file ({:s}) found - segmenting without.'.format(self.filename_op))
             self.have_op = False
 
         self.find_center_of_colony()
@@ -94,10 +94,10 @@ class Ws3d(object):
         :param foreground_index: Set the index that contains the foreground (i.e. did you use the first or the second label in Ilastik for the background? Default is that the first label (i.e. 0) is background and 1 corresponds to foreground.
         """
 
-        if self.image_dim == 2:
+        if self.image_dim == 3:
             with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
                 self.probability_map = h['exported_data'][:][:, :, :, foreground_index]  # index 1 is the nuclei
-        elif self.image_dim == 3:
+        elif self.image_dim == 2:
             with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
                 self.probability_map = h['exported_data'][:][:, :, foreground_index]  # index 1 is the nuclei
         else:
@@ -105,7 +105,8 @@ class Ws3d(object):
 
         print("shape", self.probability_map.shape, self.image_stack.shape)
         if not self.probability_map.shape == self.image_stack.shape:
-            print("ERROR: probability map does not have same dimensions as image")
+            print("ERROR: probability map does not have same dimensions as image", self.probability_map.shape,
+                  self.image_stack.shape)
             return
 
         self.mask = self.probability_map > prob
@@ -241,24 +242,34 @@ class Ws3d(object):
             raise RuntimeError('wrong dimensions')
 
         pm = self.probability_map.copy()
-        print(pm.shape)
+        # print(pm.shape)
         pm = gaussian_filter(pm, sigma=sigma)
         # normalize back to [0,1]
         pm[pm > 1] = 1.
         pm[pm < 0.05] = 0.
         return pm
 
-    def segment(self, min_distance=2, sigma=(2, 2, 6), do_not_use_object_classifier=True):
+    def segment(self, min_distance=2, sigma=None, do_not_use_object_classifier=True):
         """
         Segment the image.
 
         :param min_distance:
-        :param sigma:
+        :param sigma: default is (2, 6, 6) for 3d or (6, 6) for 2d
         :param do_not_use_object_classifier:
         """
 
         if self.probability_map is None:
-            print('probability map not loaded, cannot segment - use load_mask first')
+            print('ERROR: probability map not loaded, cannot segment - use load_mask first')
+            return
+
+        if sigma is None:
+            if self.image_dim == 3:
+                sigma = (2, 2, 6)
+            elif self.image_dim == 2:
+                sigma = (6, 6)
+            else:
+                raise NotImplementedError
+            print('set sigma =', sigma)
 
         # have object classifier or don't
         if self.have_op and not do_not_use_object_classifier:
@@ -334,29 +345,48 @@ class Ws3d(object):
         _, ax = plt.subplots(1, 2, figsize=figsize)
 
         # show seeds on the original image
-        if z is None:
-            # plot the maximum intensity projection
-            mip = self.image_stack.max(axis=0)
+        if self.image_dim == 3:
+            if z is None:
+                # plot the maximum intensity projection
+                mip = self.image_stack.max(axis=0)
+            else:
+                mip = self.image_stack[z]
+            if contrast_stretch:
+                ax[0].imshow(self._contrast_stretch(mip), cmap=plt.cm.viridis)
+            else:
+                ax[0].imshow(mip, cmap=plt.cm.viridis)
+        elif self.image_dim == 2:
+            if contrast_stretch:
+                ax[0].imshow(self._contrast_stretch(self.image_stack), cmap=plt.cm.viridis)
+            else:
+                ax[0].imshow(self.image_stack, cmap=plt.cm.viridis)
         else:
-            mip = self.image_stack[z]
-        if contrast_stretch:
-            ax[0].imshow(self._contrast_stretch(mip), cmap=plt.cm.viridis)
-        else:
-            ax[0].imshow(mip, cmap=plt.cm.viridis)
+            raise NotImplementedError
 
-        ax[0].set_title('maximum intensity projection')
-        ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
-        ax[0].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
-        ax[0].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
+        if self.image_dim == 3:
+            ax[0].set_title('maximum intensity projection')
+            ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
+            ax[0].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
+            ax[0].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
+        else:
+            ax[0].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr')
+            ax[0].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
+            ax[0].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
 
         # show watershed. Do it on the dataframe since may have deleted cells
-        if z is None:
-            ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
+        if self.image_dim == 3:
+            if z is None:
+                ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
+            else:
+                ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed))
+            ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
+            ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
+            ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
         else:
-            ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed))
-        ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
-        ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
-        ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
+            ax[1].imshow(self.ws, cmap=self.myrandom_cmap(seed=seed))
+            ax[1].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr')
+            ax[1].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
+            ax[1].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
 
     def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=True, z=None, seed=130):
         """
@@ -417,10 +447,13 @@ class Ws3d(object):
             # all elements that are NOT in the good nuclei
 
             # show watershed after selections.
-            if z is None:
-                ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower')
+            if self.image_dim == 3:
+                if z is None:
+                    ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower')
+                else:
+                    ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower')
             else:
-                ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower')
+                ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower')
             ax.set_title('after selection of good nuclei')
 
     def apply_to_channels(self, filename, channel_id, remove_background=True):
@@ -478,11 +511,16 @@ class Ws3d(object):
             mask = self.mask
         data[~mask] = 0  # set all False values to 0
 
-        x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
-        r = np.sqrt((x - self.center[1]) ** 2 + (y - self.center[2]) ** 2)
-        r = r.astype(np.int)
-        # now make 3d
-        r = np.tile(r, (data.shape[0], 1, 1))
+        if self.image_dim == 3:
+            x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
+            r = np.sqrt((x - self.center[1]) ** 2 + (y - self.center[2]) ** 2)
+            r = r.astype(np.int)
+            # now make 3d
+            r = np.tile(r, (data.shape[0], 1, 1))
+        else:
+            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+            r = np.sqrt((x - self.center[0]) ** 2 + (y - self.center[1]) ** 2)
+            r = r.astype(np.int)
 
         tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
 
@@ -514,7 +552,7 @@ class Ws3d(object):
         if only_selected_cells:
             return self.df.good_nuclei
         else:
-            return self.df.index  # all
+            return self.df.index  # all cells
 
     def dot_plot(self, channel_id, colormap_cutoff=0.5, only_selected_cells=False):
         """
@@ -529,8 +567,13 @@ class Ws3d(object):
         index = self._get_indices(only_selected_cells)
 
         fig, ax = plt.subplots()
-        cax = ax.scatter(np.vstack(self.df.centroid[index].values.flat)[:, 1], np.vstack(
-            self.df.centroid[index].values.flat)[:, 2], c=self.df[channel_id][index].values,
+        if self.image_dim == 3:
+            indices = (1,2)
+        else:
+            indices = (0,1)
+
+        cax = ax.scatter(np.vstack(self.df.centroid[index].values.flat)[:, indices[0]], np.vstack(
+            self.df.centroid[index].values.flat)[:, indices[1]], c=self.df[channel_id][index].values,
                          s=40, edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*self.df[
                 channel_id][index].values.max())
         self.nice_spines(ax)
@@ -556,11 +599,13 @@ class Ws3d(object):
         """
         index = self._get_indices(only_selected_cells)
 
-        x = np.vstack(self.df.centroid[index].values.flat)[:, 1]
-        y = np.vstack(self.df.centroid[index].values.flat)[:, 2]
+        indx_change = 0 if self.image_dim == 3 else 1
+
+        x = np.vstack(self.df.centroid[index].values.flat)[:, 1 - indx_change]
+        y = np.vstack(self.df.centroid[index].values.flat)[:, 2 - indx_change]
         i = self.df[channel_id][index].values
 
-        r = np.sqrt((x-self.center[1])**2+(y-self.center[2])**2)
+        r = np.sqrt((x-self.center[1-indx_change])**2+(y-self.center[2-indx_change])**2)
         # r = np.round(r).astype(np.int)
 
         # n = np.bincount(r, i)
