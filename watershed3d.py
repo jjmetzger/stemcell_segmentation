@@ -114,13 +114,13 @@ class Ws3d(object):
         # self.probability_map[self.probability_map < prob] = 0.
 
         # load object prediction if there
-        if self.image_dim == 3:
-            if self.have_op:
+        if self.have_op:
+            if self.image_dim == 3:
                 with h5py.File(re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE), 'r') as h:
                     self.op = np.swapaxes(np.squeeze(h['exported_data']), 2, 0)  # object prediction
                 print('loaded object prediction')
-        else:
-            raise NotImplementedError("not implemented for 2d")
+            else:
+                raise NotImplementedError("not implemented for 2d")
 
     def plot_probability_map(self, z=None, contrast_stretch=False, figsize=None):
 
@@ -270,6 +270,10 @@ class Ws3d(object):
             else:
                 raise NotImplementedError
             print('set sigma =', sigma)
+        else:
+            if not self.image_dim == len(sigma):
+                raise RuntimeError('sigma needs to be same dimension as image')
+
 
         # have object classifier or don't
         if self.have_op and not do_not_use_object_classifier:
@@ -676,7 +680,7 @@ class Ws3d(object):
 
     # static methods
     @staticmethod
-    def remove_background(im, n=1000):
+    def remove_background(im, n=None):
         """
         basic method to remove background, returns background subtracted image
 
@@ -684,11 +688,24 @@ class Ws3d(object):
         :param n: lowest non-zero n pixels are used to estimate background
         :return: background subtracted image
         """
-        imm = im.mean(axis=0)
+
+        if im.ndim == 3:
+            imm = im.mean(axis=0)
+        elif im.ndim == 2:
+            imm = im.copy()
+        else:
+            raise RuntimeError("image has neither dimension 2 or 3")
         # following in comments has a bug
         # im -= np.partition(imm[imm.nonzero()], n)[:n].mean().astype(im.dtype)
         # im[im<0.] = 0.  # set negatives to 0
         # return im
+
+        if n is None:
+            if im.ndim == 2:
+                n = 100
+            else:
+                n = 1000
+                
         return im - np.partition(imm[imm.nonzero()], n)[:n].mean()
 
     @staticmethod
