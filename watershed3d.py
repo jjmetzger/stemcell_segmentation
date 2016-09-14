@@ -8,7 +8,7 @@ from skimage.feature import peak_local_max
 import skimage
 from scipy.ndimage.filters import maximum_filter, gaussian_filter
 # from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
-from skimage.morphology import ball, binary_erosion
+from skimage.morphology import ball, disk, binary_erosion, remove_small_objects, binary_dilation
 # from skimage.segmentation import random_walker
 import numpy as np
 import skimage.io as io
@@ -64,6 +64,7 @@ class Ws3d(object):
         self.probability_map = None
         self.ws = None
         self.df = None
+        self.labels_cyto = None
         # self.good_nuclei = None
         self.center = None
         # self.channels = {}
@@ -249,7 +250,8 @@ class Ws3d(object):
         pm[pm < 0.05] = 0.
         return pm
 
-    def segment(self, min_distance=2, sigma=None, do_not_use_object_classifier=True):
+    def segment(self, min_distance=2, sigma=None, do_not_use_object_classifier=True, opensize_small_objects=10,
+                remove_small_nuclei=False, cyto_size=None):
         """
         Segment the image.
 
@@ -297,6 +299,32 @@ class Ws3d(object):
             markers = ndi.label(self.peak_array)[0]
 
             self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
+
+            if remove_small_nuclei:
+                self.ws = remove_small_objects(self.ws, min_size=opensize_small_objects)
+                self.peak_array *= self.ws > 0  # keep only the watershed seeds that are on top of data that has not been
+                # removed
+                # as small object
+                self.peaks = np.transpose(np.nonzero(self.peak_array))
+
+            # cytoplasm
+            if cyto_size is not None:
+                if self.image_dim == 2:
+                    selem = disk(cyto_size)
+                else:
+                    selem = ball(cyto_size)
+
+                extended_mask = binary_dilation(self.ws, selem=selem)
+                self.labels_cyto = skimage.morphology.watershed(-self.image_stack, markers, mask=extended_mask)
+                self.labels_cyto[self.ws > 0] = 0
+                # self.perimeter_cyto = np.ma.masked_where(self.labels_cyto < 1, self.labels_cyto)
+                # border = binary_erosion(self.labels, selem=disk(8))
+                # border = np.logical_xor(self.labels, border)
+                # self.perimeter = np.ma.masked_where(~border, self.labels)
+
+            # also do cytoplasm
+
+
             # self.ws = mh.cwatershed(-self.image_stack,markers)
             # self.ws *= self.mask
 
@@ -307,28 +335,42 @@ class Ws3d(object):
             # indices = [i1.label for i1 in rp]
             # indices = pd.Index(indices, name='cell_id')
             # self.df = pd.DataFrame(rpd, index=indices, columns=columns)
-            self.df = self._regionprops_to_dataframe(self.ws, self.image_stack)
+            self.df = self._regionprops_to_dataframe(self.ws, self.image_stack, self.labels_cyto)
 
             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
     @staticmethod
-    def _regionprops_to_dataframe(ws, image_stack):
+    def _regionprops_to_dataframe(ws, image_stack, cyto=None):
         """
         Return pd.DataFrame with relevant entries from watershed image. Keep static so can use it for other images as
         well.
 
         :param ws: watershed array
         :param image_stack: image array
+        :param cyto: cytoplasm)
         :return: pd.DataFrame with entries ('area', 'total_intensity', 'mean_intensity', 'centroid') and index 'cell_id'
         """
 
         rp = skimage.measure.regionprops(ws, intensity_image=image_stack)
-        columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
-        rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-        indices = [i1.label for i1 in rp]
-        indices = pd.Index(indices, name='cell_id')
-        print('len rp=', len(rp))
-        return pd.DataFrame(rpd, index=indices, columns=columns)
+
+        if cyto is None:
+            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
+            rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            indices = [i1.label for i1 in rp]
+            indices = pd.Index(indices, name='cell_id')
+            print('len rp=', len(rp))
+            return pd.DataFrame(rpd, index=indices, columns=columns)
+        else:
+            rp_cyto = skimage.measure.regionprops(cyto, intensity_image=image_stack)
+            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'area_cyto', 'total_intensity_cyto',
+                       'mean_intensity_cyto')
+            rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity] for i1 in rp_cyto]
+            indices = [i1.label for i1 in rp]
+            indices = pd.Index(indices, name='cell_id')
+            print('len rp=', len(rp))
+            return pd.DataFrame([rpd, rpd_cyto], index=indices, columns=columns)
+
 
     def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130):
         """
@@ -705,7 +747,6 @@ class Ws3d(object):
                 n = 100
             else:
                 n = 1000
-                
         return im - np.partition(imm[imm.nonzero()], n)[:n].mean()
 
     @staticmethod
