@@ -69,10 +69,14 @@ class Ws3d(object):
         self.center = None
         # self.channels = {}
         self.channels_image = {}
-        self.probability_map_filename = re.sub('\.tif$', '_Probabilities.h5', self.filename, re.IGNORECASE)
+        p_re = re.compile('\.tif{1,2}$', re.I)
+        if p_re.search(self.filename) is None:
+            raise RuntimeError('did not recognize file ' + self.filename + ' as tif file')
+        self.probability_map_filename = p_re.sub('_Probabilities.h5', self.filename, re.I)
         if not os.path.isfile(self.probability_map_filename):
-            print('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik classification?')
-            return
+            raise RuntimeError('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik')
+        else:
+            print('found probability map', self.probability_map_filename)
         self.mask = None
         self.mask_selected = None
 
@@ -102,7 +106,7 @@ class Ws3d(object):
             with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
                 self.probability_map = h['exported_data'][:][:, :, foreground_index]  # index 1 is the nuclei
         else:
-            raise RuntimeError
+            raise RuntimeError('unkonwn dimension')
 
         print("shape", self.probability_map.shape, self.image_stack.shape)
         if not self.probability_map.shape == self.image_stack.shape:
