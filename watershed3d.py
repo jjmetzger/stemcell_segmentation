@@ -74,17 +74,17 @@ class Ws3d(object):
             raise RuntimeError('did not recognize file ' + self.filename + ' as tif file')
         self.probability_map_filename = p_re.sub('_Probabilities.h5', self.filename, re.I)
         if not os.path.isfile(self.probability_map_filename):
-            raise RuntimeError('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik')
+            raise RuntimeError('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik '
+                                                                             'classification?')
         else:
             print('found probability map', self.probability_map_filename)
         self.mask = None
         self.mask_selected = None
 
         # try to locate object prediction
-        self.filename_op = re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE)
+        self.filename_op = p_re.sub('_Object Predictions.h5', self.filename, re.IGNORECASE)
         self.op = None
         self.have_op = True
-
         if not os.path.isfile(self.filename_op):
             # print('No object prediction file ({:s}) found - segmenting without.'.format(self.filename_op))
             self.have_op = False
@@ -156,7 +156,7 @@ class Ws3d(object):
         #     print('Error: image to plot is not in the correct format - needs to be a numpy array.')
         #     return
 
-        if z is not None and image_to_plot.ndim != 2:
+        if z is not None and image_to_plot.ndim == 2:
             print("Warning: Gave z-information but only have 2d image")
             z = None
 
@@ -215,7 +215,7 @@ class Ws3d(object):
                                 self.image_stack.max(),
                                 self.image_stack.shape))
 
-    def filter_probability_map(self, sigma=None):
+    def _filter_probability_map(self, sigma=None):
         """
         Filter the probability map using a gaussian filter. Use the dimensions provided.
 
@@ -280,7 +280,6 @@ class Ws3d(object):
             if not self.image_dim == len(sigma):
                 raise RuntimeError('sigma needs to be same dimension as image')
 
-
         # have object classifier or don't
         if self.have_op and not do_not_use_object_classifier:
             raise NotImplementedError
@@ -291,7 +290,7 @@ class Ws3d(object):
             #     min_distance = 2
 
             # get smoothed probability map
-            pm = self.filter_probability_map(sigma=sigma)
+            pm = self._filter_probability_map(sigma=sigma)
             # self.peaks = peak_local_max(pm, min_distance=min_distance)
 
             # distance = ndi.distance_transform_edt(pm)
@@ -375,7 +374,6 @@ class Ws3d(object):
             print('len rp=', len(rp))
             return pd.DataFrame([rpd, rpd_cyto], index=indices, columns=columns)
 
-
     def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130):
         """
         Show segmentation on the maximum intensity projection or per z-slice
@@ -390,7 +388,7 @@ class Ws3d(object):
             print('do not have cell positions, run segment first')
 
         if figsize is None:
-            figsize = (6, 12)
+            figsize = (12, 12)
         # self.grid_plot(self.image_stack,  z=z, contrast_stretch=contrast_stretch, figsize=figsize)
         _, ax = plt.subplots(1, 2, figsize=figsize)
 
@@ -414,7 +412,10 @@ class Ws3d(object):
             raise NotImplementedError
 
         if self.image_dim == 3:
-            ax[0].set_title('maximum intensity projection')
+            if z is None:
+                ax[0].set_title('maximum intensity projection')
+            else:
+                ax[0].set_title('z = ' + str(z))
             ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
             ax[0].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
             ax[0].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
@@ -734,6 +735,7 @@ class Ws3d(object):
         :param n: lowest non-zero n pixels are used to estimate background
         :return: background subtracted image
         """
+        # TODO: check whether this can make negative intensities
 
         if im.ndim == 3:
             imm = im.mean(axis=0)
@@ -751,7 +753,7 @@ class Ws3d(object):
                 n = 100
             else:
                 n = 1000
-        return im - np.partition(imm[imm.nonzero()], n)[:n].mean()
+        return im - np.partition(imm[imm.nonzero()], n)[:n].mean()  # fast way of getting lowest n nonzero values
 
     @staticmethod
     def myrandom_cmap(seed=None, return_darker=False, n=1024):
