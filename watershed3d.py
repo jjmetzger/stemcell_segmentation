@@ -19,7 +19,7 @@ from scipy.ndimage.measurements import center_of_mass  # note this gives center 
 # i.e. to plot need to reverse
 
 io.use_plugin('tifffile')
-sys.path.append('/Users/jakob/Documents/RU/Code/segment')
+# sys.path.append('/Users/jakob/Documents/RU/Code/segment')
 
 
 class Ws3d(object):
@@ -28,17 +28,18 @@ class Ws3d(object):
     object classifier from Ilastik, uses this for seeding. Otherwise tries to guess blobs for seeding.
     """
 
-    def __init__(self, imagefile, xy_scale=1.0, z_scale=1.5):
+    def __init__(self, imagefile, xy_scale=1.0, z_scale=1.5, z=None):
         """
         Initializes Ws3d with an imagefile. Can set the relative x,y and z scales of the z-stack, which is important
         for the blob
         detection.
 
-        :param imagefile:
-        :param xy_scale:
-        :param z_scale:
+        :param imagefile: File to segment
+        :param xy_scale: scale in micrometer of the x and y pixels
+        :param z_scale: same as above for z
         """
 
+        self.z = z
         self.fontsize = 16
         self.filename = imagefile
         self.image_stack = io.imread(imagefile)
@@ -54,6 +55,7 @@ class Ws3d(object):
             if self.z_size > self.x_size or self.z_size > self.y_size:
                 raise RuntimeError("ERROR: z must be the first and smallest dimension")
             self.z_scale = z_scale
+
         else:
             raise RuntimeError("Image is neither 2 or 3 dimensional")
 
@@ -126,6 +128,13 @@ class Ws3d(object):
                 print('loaded object prediction')
             else:
                 raise NotImplementedError("not implemented for 2d")
+
+        if self.z is not None:
+            print('selecting z =' + str(self.z))
+            self.image_dim = 2
+            self.image_stack = self.image_stack[self.z]
+            self.mask = self.mask[self.z]
+            self.probability_map = self.probability_map[self.z]
 
     def plot_probability_map(self, z=None, contrast_stretch=False, figsize=None):
 
@@ -254,6 +263,83 @@ class Ws3d(object):
         pm[pm < 0.05] = 0.
         return pm
 
+    # def segment_each_z(self, z, min_distance=2, sigma=None, do_not_use_object_classifier=True,
+    #                    opensize_small_objects=10, remove_small_nuclei=False, cyto_size=None):
+    #     """
+    #     Segment the image.
+    #
+    #     :param z: if have 3d image, can give z or range of z to be segmentent as 2d images
+    #     :param min_distance:
+    #     :param sigma: default is (2, 6, 6) for 3d or (6, 6) for 2d
+    #     :param do_not_use_object_classifier:
+    #     """
+    #
+    #     if z is not None:
+    #         if self.image_dim != 3:
+    #             raise RuntimeError('gave z but do not have a 3d image')
+    #         else:
+    #             try:
+    #                 len(z)
+    #             except TypeError:
+    #                 z = [z]
+    #
+    #     if self.probability_map is None:
+    #         print('ERROR: probability map not loaded, cannot segment - use load_mask first')
+    #         return
+    #
+    #     if sigma is None:
+    #         if self.image_dim == 3:
+    #             sigma = (2, 2, 6)
+    #         elif self.image_dim == 2:
+    #             sigma = (6, 6)
+    #         else:
+    #             raise NotImplementedError
+    #         print('set sigma =', sigma)
+    #     else:
+    #         if not self.image_dim == len(sigma):
+    #             raise RuntimeError('sigma needs to be same dimension as image')
+    #
+    #     # have object classifier or don't
+    #     if self.have_op and not do_not_use_object_classifier:
+    #         raise NotImplementedError
+    #
+    #     # NO object classifier, use smoothed map and find peaks in probability map
+    #     else:
+    #         # get smoothed probability map
+    #         pm = self._filter_probability_map(sigma=sigma)
+    #
+    #         for zi in z:
+    #
+    #             self.peak_array = peak_local_max(pm[zi], min_distance=min_distance, indices=False)
+    #             self.peaks = np.transpose(np.nonzero(self.peak_array))  # same as above with indices True, but need that too
+    #
+    #             markers = ndi.label(self.peak_array)[0]
+    #
+    #             self.ws = skimage.morphology.watershed(-self.image_stack[zi], markers, mask=self.mask[zi])
+    #
+    #             if remove_small_nuclei:
+    #                 self.ws = remove_small_objects(self.ws, min_size=opensize_small_objects)
+    #                 self.peak_array *= self.ws > 0  # keep only the watershed seeds that are on top of data that has not been
+    #                 # removed
+    #                 # as small object
+    #                 self.peaks = np.transpose(np.nonzero(self.peak_array))
+    #
+    #             # cytoplasm
+    #             if cyto_size is not None:
+    #                 selem = disk(cyto_size)
+    #                 extended_mask = binary_dilation(self.ws, selem=selem)
+    #                 self.labels_cyto = skimage.morphology.watershed(-self.image_stack[zi], markers, mask=extended_mask)
+    #                 self.labels_cyto[self.ws > 0] = 0
+    #                 # self.perimeter_cyto = np.ma.masked_where(self.labels_cyto < 1, self.labels_cyto)
+    #                 # border = binary_erosion(self.labels, selem=disk(8))
+    #                 # border = np.logical_xor(self.labels, border)
+    #                 # self.perimeter = np.ma.masked_where(~border, self.labels)
+    #
+    #             # also do cytoplasm
+    #             self.df = self._regionprops_to_dataframe(self.ws, self.image_stack, self.labels_cyto)
+    #
+    #             print('segmentation done, found', self.peaks.shape[0], 'cells')
+
     def segment(self, min_distance=2, sigma=None, do_not_use_object_classifier=True, opensize_small_objects=10,
                 remove_small_nuclei=False, cyto_size=None):
         """
@@ -262,6 +348,7 @@ class Ws3d(object):
         :param min_distance:
         :param sigma: default is (2, 6, 6) for 3d or (6, 6) for 2d
         :param do_not_use_object_classifier:
+        :param z: if have 3d image, can give z or range of z to be segmentent as 2d images
         """
 
         if self.probability_map is None:
@@ -350,7 +437,7 @@ class Ws3d(object):
 
         :param ws: watershed array
         :param image_stack: image array
-        :param cyto: cytoplasm)
+        :param cyto: cytoplasm
         :return: pd.DataFrame with entries ('area', 'total_intensity', 'mean_intensity', 'centroid') and index 'cell_id'
         """
 
@@ -361,7 +448,7 @@ class Ws3d(object):
             rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
             indices = [i1.label for i1 in rp]
             indices = pd.Index(indices, name='cell_id')
-            print('len rp=', len(rp))
+            # print('len rp=', len(rp))
             return pd.DataFrame(rpd, index=indices, columns=columns)
         else:
             rp_cyto = skimage.measure.regionprops(cyto, intensity_image=image_stack)
@@ -371,7 +458,7 @@ class Ws3d(object):
             rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity] for i1 in rp_cyto]
             indices = [i1.label for i1 in rp]
             indices = pd.Index(indices, name='cell_id')
-            print('len rp=', len(rp))
+            # print('len rp=', len(rp))
             return pd.DataFrame([rpd, rpd_cyto], index=indices, columns=columns)
 
     def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130):
@@ -523,7 +610,10 @@ class Ws3d(object):
         im = io.imread(filename)
         if remove_background:
             im = self.remove_background(im)
-        assert self.ws.shape == im.shape
+
+        if self.ws.shape != im.shape:
+            raise RuntimeError('image shapes are not the same, original is ' + str(self.ws.shape) + ' and to be '
+                                'superimpose is ' + str(im.shape))
         # self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)
         channel_df = self._regionprops_to_dataframe(self.ws, im)
         channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid']
