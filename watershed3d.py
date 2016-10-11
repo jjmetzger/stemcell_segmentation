@@ -631,7 +631,7 @@ class Ws3d(object):
         find center of mass
         """
 
-        self.center = np.array(center_of_mass(self.image_stack))
+        self.center = np.array(center_of_mass(np.abs(self.image_stack)))
 
     def radial_intensity(self, channel_id, only_selected_nuclei=False, plot=True):
         """
