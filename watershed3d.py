@@ -594,7 +594,7 @@ class Ws3d(object):
                 ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower')
             ax.set_title('after selection of good nuclei')
 
-    def apply_to_channels(self, filename, channel_id, remove_background=True):
+    def apply_to_channels(self, filename, channel_id, remove_background=False):
         """
         Apply nuclear marker to other channels.
 
@@ -763,7 +763,7 @@ class Ws3d(object):
             ax.set_ylabel(channel_id, fontsize=self.fontsize)
             # ax.set_xlim([0, ax.get_xlim()[1]])
             self.nice_spines(ax)
-        return xn, n/n2
+        return xn[:-1] - xn[0], n/n2
 
     def coexpression_per_cell(self, channel_id1, channel_id2, only_selected_cells=False):
         """
@@ -814,6 +814,69 @@ class Ws3d(object):
         ax.set_xlabel(channel_id1, fontsize=self.fontsize)
         ax.set_ylabel(channel_id2, fontsize=self.fontsize)
         ax.autoscale(tight=1)
+
+    def z_heat_map(self, plot=True):
+        """
+        make a heat map of the z-position
+        :return:
+        """
+
+        # make an index array of the same shape as image, but with z-index as value
+        index_array = np.rollaxis(np.tile(np.arange(self.mask.shape[0]), (self.mask.shape[1], self.mask.shape[2], 1)),
+                                  2, 0)
+        z_extent = np.max(index_array * self.mask, axis=0)
+
+        if plot:
+            plt.imshow(z_extent)
+            plt.colorbar()
+
+        return z_extent
+
+    def radial_z_height(self, plot=True):
+        """
+        Get radial height
+
+        :param channel_id:
+        :param only_selected_nuclei:
+        :param plot:
+        :return:
+        """
+
+        data = self.z_heat_map(plot=False)
+
+        if self.image_dim == 3:
+            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+            r = np.sqrt((x - self.center[1]) ** 2 + (y - self.center[2]) ** 2)
+            r = r.astype(np.int)
+        else:
+            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+            r = np.sqrt((x - self.center[0]) ** 2 + (y - self.center[1]) ** 2)
+            r = r.astype(np.int)
+
+        tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
+        nr = np.bincount(r.ravel())
+        radialprofile = tbin / nr
+
+        if np.isnan(radialprofile).any():
+            print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+            radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
+
+        rvec = np.arange(radialprofile.shape[0])*self.xy_scale
+
+        # smooth a bit
+        radialprofile = self.running_mean(radialprofile, 20)
+        rvec = rvec[:radialprofile.shape[0]]
+
+        if plot:
+            fig, ax = plt.subplots()
+            ax.plot(rvec, radialprofile)
+            ax.set_ylim([0., ax.get_ylim()[1]])
+            ax.set_xlim([0., ax.get_xlim()[1]/np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
+            ax.set_xlabel('distance ($\mu m$)', fontsize=self.fontsize)
+            ax.set_ylabel('z', fontsize=self.fontsize)
+            self.nice_spines(ax)
+
+        return rvec, radialprofile
 
     # static methods
     @staticmethod
@@ -902,3 +965,9 @@ class Ws3d(object):
         """
         p2, p98 = np.percentile(img, percentile)
         return skimage.exposure.rescale_intensity(img, in_range=(p2, p98))
+
+    @staticmethod
+    def running_mean(x, N):
+        # http://stackoverflow.com/questions/13728392/moving-average-or-running-mean
+        cumsum = np.cumsum(np.insert(x, 0, 0))
+        return (cumsum[N:] - cumsum[:-N]) / N
