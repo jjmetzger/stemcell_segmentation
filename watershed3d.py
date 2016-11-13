@@ -15,8 +15,10 @@ import skimage.io as io
 import matplotlib.pylab as plt
 import pandas as pd
 from matplotlib.pyplot import rcParams
-from scipy.ndimage.measurements import center_of_mass  # note this gives center of mass in column, row format,
-# i.e. to plot need to reverse
+from scipy.ndimage.measurements import center_of_mass  # note this gives center of mass in column, row format, i.e. to plot need to reverse
+from distutils.version import LooseVersion
+from matplotlib.colors import LogNorm
+from skimage.filters import threshold_otsu
 
 io.use_plugin('tifffile')
 # sys.path.append('/Users/jakob/Documents/RU/Code/segment')
@@ -76,7 +78,9 @@ class Ws3d(object):
             raise RuntimeError('did not recognize file ' + self.filename + ' as tif file')
         self.probability_map_filename = p_re.sub('_Probabilities.h5', self.filename, re.I)
         if not os.path.isfile(self.probability_map_filename):
-            raise RuntimeError('ERROR: file', self.probability_map_filename, 'not found. Did you do the Ilastik '
+            # raise RuntimeWarning('WARNING: file', self.probability_map_filename, 'not found. Did you do the Ilastik '
+            #                                                                  'classification? Using Otsu thresholding instead')
+            raise RuntimeError('Error: file', self.probability_map_filename, 'not found. Did you do the Ilastik '
                                                                              'classification?')
         else:
             print('found probability map', self.probability_map_filename)
@@ -93,7 +97,7 @@ class Ws3d(object):
 
         self.find_center_of_colony()
 
-    def load_mask(self, prob=0.5, foreground_index=1):
+    def load_mask(self, method='ilastik', prob=0.5, foreground_index=1):
         """
         Load the probability mask and object prediction if it exists.
 
@@ -101,48 +105,59 @@ class Ws3d(object):
         :param foreground_index: Set the index that contains the foreground (i.e. did you use the first or the second label in Ilastik for the background? Default is that the first label (i.e. 0) is background and 1 corresponds to foreground.
         """
 
-        if self.image_dim == 3:
-            with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
-                self.probability_map = h['exported_data'][:][:, :, :, foreground_index]  # index 1 is the nuclei
-        elif self.image_dim == 2:
-            with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
-                self.probability_map = h['exported_data'][:][:, :, foreground_index]  # index 1 is the nuclei
-        else:
-            raise RuntimeError('unkonwn dimension')
-
-        print("shape", self.probability_map.shape, self.image_stack.shape)
-        if not self.probability_map.shape == self.image_stack.shape:
-            print("ERROR: probability map does not have same dimensions as image", self.probability_map.shape,
-                  self.image_stack.shape)
-            return
-
-        self.mask = self.probability_map > prob
-        print('loaded probability map')
-        # self.probability_map[self.probability_map < prob] = 0.
-
-        # load object prediction if there
-        if self.have_op:
+        if method == 'ilastik':
             if self.image_dim == 3:
-                with h5py.File(re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE), 'r') as h:
-                    self.op = np.swapaxes(np.squeeze(h['exported_data']), 2, 0)  # object prediction
-                print('loaded object prediction')
+                with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
+                    self.probability_map = h['exported_data'][:][:, :, :, foreground_index]  # index 1 is the nuclei
+            elif self.image_dim == 2:
+                with h5py.File(self.probability_map_filename, 'r') as h:  # r+: read/write, file must exist
+                    self.probability_map = h['exported_data'][:][:, :, foreground_index]  # index 1 is the nuclei
             else:
-                raise NotImplementedError("not implemented for 2d")
+                raise RuntimeError('unkonwn dimension')
 
-        if self.z is not None:
-            print('selecting z =' + str(self.z))
-            self.image_dim = 2
-            self.image_stack = self.image_stack[self.z]
-            self.mask = self.mask[self.z]
-            self.probability_map = self.probability_map[self.z]
+            print("shape", self.probability_map.shape, self.image_stack.shape)
+            if not self.probability_map.shape == self.image_stack.shape:
+                print("ERROR: probability map does not have same dimensions as image", self.probability_map.shape,
+                      self.image_stack.shape)
+                return
+
+            self.mask = self.probability_map > prob
+            print('loaded probability map')
+            # self.probability_map[self.probability_map < prob] = 0.
+
+            # load object prediction if there
+            if self.have_op:
+                if self.image_dim == 3:
+                    with h5py.File(re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE), 'r') as h:
+                        self.op = np.swapaxes(np.squeeze(h['exported_data']), 2, 0)  # object prediction
+                    print('loaded object prediction')
+                else:
+                    raise NotImplementedError("not implemented for 2d")
+
+            if self.z is not None:
+                print('selecting z =' + str(self.z))
+                self.image_dim = 2
+                self.image_stack = self.image_stack[self.z]
+                self.mask = self.mask[self.z]
+                self.probability_map = self.probability_map[self.z]
+
+        elif method == 'otsu':
+            otsu = threshold_otsu(self.image_stack)
+            self.mask = self.image_stack > otsu
+
+        else:
+            raise RuntimeError('unknown method')
 
     def plot_probability_map(self, z=None, contrast_stretch=False, figsize=None):
 
         if self.probability_map is None:
-            print('probability map not loaded, cannot plot - use load_mask first')
-            return
-
-        self.grid_plot(self.probability_map, z, contrast_stretch, figsize)
+            if self.mask is None:
+                raise RuntimeError('neither probability map nor mask loaded, cannot plot - use load_mask first')
+            else:
+                print('do not have probability map, plotting mask instead')
+                self.grid_plot(self.mask, z, contrast_stretch, figsize)
+        else:
+            self.grid_plot(self.probability_map, z, contrast_stretch, figsize)
 
     def grid_plot(self, image_to_plot, z=None, contrast_stretch=False, figsize=None, cmap=None):
         """
@@ -255,7 +270,10 @@ class Ws3d(object):
         else:
             raise RuntimeError('wrong dimensions')
 
-        pm = self.probability_map.copy()
+        if self.probability_map is not None:
+            pm = self.probability_map.copy()
+        else:
+            pm = self.mask.copy()
         # print(pm.shape)
         pm = gaussian_filter(pm, sigma=sigma)
         # normalize back to [0,1]
@@ -341,7 +359,7 @@ class Ws3d(object):
     #             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
     def segment(self, min_distance=2, sigma=None, do_not_use_object_classifier=True, opensize_small_objects=10,
-                remove_small_nuclei=False, cyto_size=None):
+                remove_small_nuclei=False, cyto_size=None, compactness=0.01):
         """
         Segment the image.
 
@@ -351,8 +369,8 @@ class Ws3d(object):
         :param z: if have 3d image, can give z or range of z to be segmentent as 2d images
         """
 
-        if self.probability_map is None:
-            print('ERROR: probability map not loaded, cannot segment - use load_mask first')
+        if self.probability_map is None and self.mask is None:
+            print('ERROR: neither probability map or mask loaded, cannot segment - use load_mask first')
             return
 
         if sigma is None:
@@ -378,17 +396,21 @@ class Ws3d(object):
 
             # get smoothed probability map
             pm = self._filter_probability_map(sigma=sigma)
-            # self.peaks = peak_local_max(pm, min_distance=min_distance)
 
-            # distance = ndi.distance_transform_edt(pm)
-            # self.peak_array = peak_local_max(distance, min_distance=min_distance, indices=False)
+            if self.probability_map is None:
+                distance = ndi.distance_transform_edt(self.mask)
+                self.peak_array = peak_local_max(distance, min_distance=min_distance, indices=False)
+            else:
+                self.peak_array = peak_local_max(pm, min_distance=min_distance, indices=False)
 
-            self.peak_array = peak_local_max(pm, min_distance=min_distance, indices=False)
             self.peaks = np.transpose(np.nonzero(self.peak_array))  # same as above with indices True, but need that too
-
             markers = ndi.label(self.peak_array)[0]
 
-            self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
+            # check for version because compactness is only available in watershed > 0.12
+            if LooseVersion(skimage.__version__) > LooseVersion('0.12'):
+                self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask, compactness=compactness)
+            else:
+                self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
 
             if remove_small_nuclei:
                 self.ws = remove_small_objects(self.ws, min_size=opensize_small_objects)
@@ -572,10 +594,19 @@ class Ws3d(object):
             # ax.bar(b_bins[:-1] + width, b_heights, width=width, facecolor='seagreen')
 
             # df_before.hist(color='k', bins=50, alpha=0.6)
-            self.df.hist(color='k', bins=50, alpha=0.6)
+            ax1 = self.df.hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
+            for ax in ax1.ravel():
+                ax.set_xticks(ax.get_xticks()[::2])
             plt.suptitle('before selection of nuclei')
-            self.df[self.df.good_nuclei].hist(color='k', bins=50, alpha=0.6)
+            plt.tight_layout()
+
+            ax1 = self.df[self.df.good_nuclei].hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
+            for ax in ax1.ravel():
+                ax.set_xticks(ax.get_xticks()[::2])
             plt.suptitle('after selection of nuclei')
+            plt.tight_layout()
+
+
 
             _, ax = plt.subplots()
             w2 = self.ws.copy()  # note the copy here, otherwise next line also affects self.ws
@@ -633,94 +664,11 @@ class Ws3d(object):
 
         self.center = np.array(center_of_mass(np.abs(self.image_stack)))
 
-    def radial_intensity(self, channel_id, only_selected_nuclei=False, plot=True):
-        """
-        Get radial intensity either for all nuclei or only selected ones. This uses the pixel information,
-        not the segmentation.
-
-        :param channel_id:
-        :param only_selected_nuclei:
-        :param plot:
-        :return:
-        """
-
-        data = self.channels_image[channel_id]
-
-        if only_selected_nuclei:
-            mask = self.mask_selected
-        else:
-            mask = self.mask
-        data[~mask] = 0  # set all False values to 0
-
-        if self.image_dim == 3:
-            x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
-            r = np.sqrt((x - self.center[1]) ** 2 + (y - self.center[2]) ** 2)
-            r = r.astype(np.int)
-            # now make 3d
-            r = np.tile(r, (data.shape[0], 1, 1))
-        else:
-            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
-            r = np.sqrt((x - self.center[0]) ** 2 + (y - self.center[1]) ** 2)
-            r = r.astype(np.int)
-
-        tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
-
-        if mask is None:
-            nr = np.bincount(r.ravel())
-        else:
-            nr = np.bincount(r.ravel(), mask.astype(np.int).ravel())  # this line makes the average, i.e. since
-            # we have
-            # more bins with certain r's, must divide by abundance. If have mask, some of those should not be
-            # counted, because they were set to zero above and should not contribute to the average.
-        radialprofile = tbin / nr
-        if np.isnan(radialprofile).any():
-            print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
-            radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
-
-        if plot:
-            fig, ax = plt.subplots()
-            ax.plot(np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile)
-            ax.set_ylim([0., ax.get_ylim()[1]])
-            ax.set_xlim([0., ax.get_xlim()[1]/np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
-            ax.set_xlabel('distance ($\mu m$)', fontsize=self.fontsize)
-            ax.set_ylabel(str(channel_id) + ' intensity', fontsize=self.fontsize)
-            # where there is no colony anyway
-            self.nice_spines(ax)
-
-        return np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile
-
     def _get_indices(self, only_selected_cells):
         if only_selected_cells:
             return self.df.good_nuclei
         else:
             return self.df.index  # all cells
-
-    def dot_plot(self, channel_id, colormap_cutoff=0.5, only_selected_cells=False):
-        """
-        Dot-plot as in Warmflash et al.
-
-        :param channel_id:
-        :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
-        :param only_selected_cells:
-        :return:
-        """
-
-        index = self._get_indices(only_selected_cells)
-
-        fig, ax = plt.subplots()
-        if self.image_dim == 3:
-            indices = (1,2)
-        else:
-            indices = (0,1)
-
-        cax = ax.scatter(np.vstack(self.df.centroid[index].values.flat)[:, indices[0]], np.vstack(
-            self.df.centroid[index].values.flat)[:, indices[1]], c=self.df[channel_id][index].values,
-                         s=40, edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*self.df[
-                channel_id][index].values.max())
-        self.nice_spines(ax)
-        ax.autoscale(tight=1)
-        ax.set_aspect('equal')
-        fig.colorbar(cax)
 
     def copy_data_to_clipboard(self):
         """
@@ -729,91 +677,185 @@ class Ws3d(object):
         """
         self.df.to_clipboard()
 
-    def radial_profile_per_cell(self, channel_id, nbins=30, plot=True, only_selected_cells=False):
-        """
+    ###################################
+    ####### END OF SEGMENTATION #######
+    ###################################
 
-        :param channel_id:
-        :param nbins: number of bins
-        :param plot:
-        :param only_selected_cells:
-        :return:
-        """
-        index = self._get_indices(only_selected_cells)
+    ###################################
+    ####### ANALYSIS ##################
+    ###################################
 
-        indx_change = 0 if self.image_dim == 3 else 1
+    #
 
-        x = np.vstack(self.df.centroid[index].values.flat)[:, 1 - indx_change]
-        y = np.vstack(self.df.centroid[index].values.flat)[:, 2 - indx_change]
-        i = self.df[channel_id][index].values
+    # def radial_intensity(self, channel_id, only_selected_nuclei=False, plot=True):
+    #     """
+    #     Get radial intensity either for all nuclei or only selected ones. This uses the pixel information,
+    #     not the segmentation.
+    #
+    #     :param channel_id:
+    #     :param only_selected_nuclei:
+    #     :param plot:
+    #     :return:
+    #     """
+    #
+    #     data = self.channels_image[channel_id]
+    #
+    #     if only_selected_nuclei:
+    #         mask = self.mask_selected
+    #     else:
+    #         mask = self.mask
+    #     data[~mask] = 0  # set all False values to 0
+    #
+    #     if self.image_dim == 3:
+    #         x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
+    #         r = np.sqrt((x - self.center[1]) ** 2 + (y - self.center[2]) ** 2)
+    #         r = r.astype(np.int)
+    #         # now make 3d
+    #         r = np.tile(r, (data.shape[0], 1, 1))
+    #     else:
+    #         x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+    #         r = np.sqrt((x - self.center[0]) ** 2 + (y - self.center[1]) ** 2)
+    #         r = r.astype(np.int)
+    #
+    #     tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
+    #
+    #     if mask is None:
+    #         nr = np.bincount(r.ravel())
+    #     else:
+    #         nr = np.bincount(r.ravel(), mask.astype(np.int).ravel())  # this line makes the average, i.e. since
+    #         # we have
+    #         # more bins with certain r's, must divide by abundance. If have mask, some of those should not be
+    #         # counted, because they were set to zero above and should not contribute to the average.
+    #     radialprofile = tbin / nr
+    #     if np.isnan(radialprofile).any():
+    #         print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+    #         radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
+    #
+    #     if plot:
+    #         fig, ax = plt.subplots()
+    #         ax.plot(np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile)
+    #         ax.set_ylim([0., ax.get_ylim()[1]])
+    #         ax.set_xlim([0., ax.get_xlim()[1]/np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
+    #         ax.set_xlabel('distance ($\mu m$)', fontsize=self.fontsize)
+    #         ax.set_ylabel(str(channel_id) + ' intensity', fontsize=self.fontsize)
+    #         # where there is no colony anyway
+    #         self.nice_spines(ax)
+    #
+    #     return np.arange(radialprofile.shape[0])*self.xy_scale, radialprofile
 
-        r = np.sqrt((x-self.center[1-indx_change])**2+(y-self.center[2-indx_change])**2)
-        # r = np.round(r).astype(np.int)
 
-        # n = np.bincount(r, i)
-        # n2 = np.bincount(r)
-        # xn = np.arange(r.min(),r.max())
-        n, xn = np.histogram(r, bins=nbins, weights=i)
-        n2, _ = np.histogram(r, bins=nbins)
+    # def dot_plot(self, channel_id, colormap_cutoff=0.5, only_selected_cells=False):
+    #     """
+    #     Dot-plot as in Warmflash et al.
+    #
+    #     :param channel_id:
+    #     :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
+    #     :param only_selected_cells:
+    #     :return:
+    #     """
+    #
+    #     index = self._get_indices(only_selected_cells)
+    #
+    #     fig, ax = plt.subplots()
+    #     if self.image_dim == 3:
+    #         indices = (1,2)
+    #     else:
+    #         indices = (0,1)
+    #
+    #     cax = ax.scatter(np.vstack(self.df.centroid[index].values.flat)[:, indices[0]], np.vstack(
+    #         self.df.centroid[index].values.flat)[:, indices[1]], c=self.df[channel_id][index].values,
+    #                      s=40, edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*self.df[
+    #             channel_id][index].values.max())
+    #     self.nice_spines(ax)
+    #     ax.autoscale(tight=1)
+    #     ax.set_aspect('equal')
+    #     fig.colorbar(cax)
 
-        if plot:
-            _, ax = plt.subplots()
-            ax.step(xn[:-1] - xn[0], n/n2, where='mid')
-            ax.fill_between(xn[:-1] - xn[0], n/n2, alpha=0.2, step='mid')
-            ax.set_xlabel('r', fontsize=self.fontsize)
-            ax.set_ylabel(channel_id, fontsize=self.fontsize)
-            # ax.set_xlim([0, ax.get_xlim()[1]])
-            self.nice_spines(ax)
-        return xn[:-1] - xn[0], n/n2
+    # def radial_profile_per_cell(self, channel_id, nbins=30, plot=True, only_selected_cells=False):
+    #     """
+    #
+    #     :param channel_id:
+    #     :param nbins: number of bins
+    #     :param plot:
+    #     :param only_selected_cells:
+    #     :return:
+    #     """
+    #     index = self._get_indices(only_selected_cells)
+    #
+    #     indx_change = 0 if self.image_dim == 3 else 1
+    #
+    #     x = np.vstack(self.df.centroid[index].values.flat)[:, 1 - indx_change]
+    #     y = np.vstack(self.df.centroid[index].values.flat)[:, 2 - indx_change]
+    #     i = self.df[channel_id][index].values
+    #
+    #     r = np.sqrt((x-self.center[1-indx_change])**2+(y-self.center[2-indx_change])**2)
+    #     # r = np.round(r).astype(np.int)
+    #
+    #     # n = np.bincount(r, i)
+    #     # n2 = np.bincount(r)
+    #     # xn = np.arange(r.min(),r.max())
+    #     n, xn = np.histogram(r, bins=nbins, weights=i)
+    #     n2, _ = np.histogram(r, bins=nbins)
+    #
+    #     if plot:
+    #         _, ax = plt.subplots()
+    #         ax.step(xn[:-1] - xn[0], n/n2, where='mid')
+    #         ax.fill_between(xn[:-1] - xn[0], n/n2, alpha=0.2, step='mid')
+    #         ax.set_xlabel('r', fontsize=self.fontsize)
+    #         ax.set_ylabel(channel_id, fontsize=self.fontsize)
+    #         # ax.set_xlim([0, ax.get_xlim()[1]])
+    #         self.nice_spines(ax)
+    #     return xn[:-1] - xn[0], n/n2
 
-    def coexpression_per_cell(self, channel_id1, channel_id2, only_selected_cells=False):
-        """
-        Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
-
-        :param channel_id1:
-        :param channel_id2:
-        :param only_selected_cells:
-        :return:
-        """
-
-        index = self._get_indices(only_selected_cells)
-
-        ch1 = self.df[channel_id1][index].values
-        ch2 = self.df[channel_id2][index].values
-
-        fig, ax = plt.subplots()
-        ax.scatter(ch1, ch2, edgecolors='none', c='k', alpha=0.8)
-        self.nice_spines(ax)
-        ax.set_xlabel(channel_id1, fontsize=self.fontsize)
-        ax.set_ylabel(channel_id2, fontsize=self.fontsize)
-        ax.autoscale(tight=1)
-
-    def coexpression_per_pixel(self, channel_id1, channel_id2, downsample=10, only_selected_cells=False):
-
-        """
-        Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one nuclear pixel.
-
-        :param channel_id1:
-        :param channel_id2:
-        :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
-        :param only_selected_cells:
-        :return:
-        """
-
-        ch1 = self.channels_image[channel_id1]
-        ch2 = self.channels_image[channel_id2]
-
-        if only_selected_cells:
-            mask = self.mask_selected
-        else:
-            mask = self.mask
-
-        fig, ax = plt.subplots()
-        ax.scatter(ch1[mask > 0][::downsample], ch2[mask > 0][::downsample], marker='o', edgecolors='none', c='k',
-                   alpha=0.8, s=4)
-        self.nice_spines(ax)
-        ax.set_xlabel(channel_id1, fontsize=self.fontsize)
-        ax.set_ylabel(channel_id2, fontsize=self.fontsize)
-        ax.autoscale(tight=1)
+    # def coexpression_per_cell(self, channel_id1, channel_id2, only_selected_cells=False):
+    #     """
+    #     Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
+    #
+    #     :param channel_id1:
+    #     :param channel_id2:
+    #     :param only_selected_cells:
+    #     :return:
+    #     """
+    #
+    #     index = self._get_indices(only_selected_cells)
+    #
+    #     ch1 = self.df[channel_id1][index].values
+    #     ch2 = self.df[channel_id2][index].values
+    #
+    #     fig, ax = plt.subplots()
+    #     ax.scatter(ch1, ch2, edgecolors='none', c='k', alpha=0.8)
+    #     nice_spines(ax)
+    #     ax.set_xlabel(channel_id1, fontsize=self.fontsize)
+    #     ax.set_ylabel(channel_id2, fontsize=self.fontsize)
+    #     ax.autoscale(tight=1)
+    #
+    # def coexpression_per_pixel(self, channel_id1, channel_id2, downsample=10, only_selected_cells=False):
+    #
+    #     """
+    #     Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one nuclear pixel.
+    #
+    #     :param channel_id1:
+    #     :param channel_id2:
+    #     :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
+    #     :param only_selected_cells:
+    #     :return:
+    #     """
+    #
+    #     ch1 = self.channels_image[channel_id1]
+    #     ch2 = self.channels_image[channel_id2]
+    #
+    #     if only_selected_cells:
+    #         mask = self.mask_selected
+    #     else:
+    #         mask = self.mask
+    #
+    #     fig, ax = plt.subplots()
+    #     ax.scatter(ch1[mask > 0][::downsample], ch2[mask > 0][::downsample], marker='o', edgecolors='none', c='k',
+    #                alpha=0.8, s=4)
+    #     nice_spines(ax)
+    #     ax.set_xlabel(channel_id1, fontsize=self.fontsize)
+    #     ax.set_ylabel(channel_id2, fontsize=self.fontsize)
+    #     ax.autoscale(tight=1)
 
     def z_heat_map(self, plot=True):
         """
@@ -874,7 +916,7 @@ class Ws3d(object):
             ax.set_xlim([0., ax.get_xlim()[1]/np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
             ax.set_xlabel('distance ($\mu m$)', fontsize=self.fontsize)
             ax.set_ylabel('z', fontsize=self.fontsize)
-            self.nice_spines(ax)
+            nice_spines(ax)
 
         return rvec, radialprofile
 
@@ -932,29 +974,6 @@ class Ws3d(object):
             return mpl.colors.ListedColormap(random_array)
 
     @staticmethod
-    def nice_spines(ax, grid=True):
-
-        ax.grid(grid)
-        gridlines = ax.get_xgridlines() + ax.get_ygridlines()
-        for line in gridlines:
-            line.set_linestyle('-')
-            line.set_linewidth(.1)
-
-        spines_to_remove = ['top', 'right']
-        spines_to_keep = ['bottom', 'left']
-        rcParams['xtick.direction'] = 'out'
-        rcParams['ytick.direction'] = 'out'
-        almost_black = '#262626'
-
-        for spine in spines_to_remove:
-            ax.spines[spine].set_visible(False)
-        ax.xaxis.set_ticks_position('bottom')
-        ax.yaxis.set_ticks_position('left')
-        for spine in spines_to_keep:
-            ax.spines[spine].set_linewidth(0.5)
-            ax.spines[spine].set_color(almost_black)
-
-    @staticmethod
     def _contrast_stretch(img, percentile=(2, 98)):
         """
         Stretch the contrast of an image to within given percentiles.
@@ -971,3 +990,471 @@ class Ws3d(object):
         # http://stackoverflow.com/questions/13728392/moving-average-or-running-mean
         cumsum = np.cumsum(np.insert(x, 0, 0))
         return (cumsum[N:] - cumsum[:-N]) / N
+
+
+def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True):
+    """
+    Get radial intensity either for all nuclei or only selected ones. This uses the pixel information,
+    not the segmentation.
+
+    :param channel_id:
+    :param only_selected_nuclei:
+    :param plot:
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    radial_profile_all = []
+
+    for w in w_list:
+        data = w.channels_image[channel_id]
+
+        if only_selected_nuclei:
+            mask = w.mask_selected
+        else:
+            mask = w.mask
+        data[~mask] = 0  # set all False values to 0
+
+        if w.image_dim == 3:
+            x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
+            r = np.sqrt((x - w.center[1]) ** 2 + (y - w.center[2]) ** 2)
+            r = r.astype(np.int)
+            # now make 3d
+            r = np.tile(r, (data.shape[0], 1, 1))
+        else:
+            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+            r = np.sqrt((x - w.center[0]) ** 2 + (y - w.center[1]) ** 2)
+            r = r.astype(np.int)
+
+        tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
+
+        if mask is None:
+            nr = np.bincount(r.ravel())
+        else:
+            nr = np.bincount(r.ravel(), mask.astype(np.int).ravel())  # this line makes the average, i.e. since
+            # we have
+            # more bins with certain r's, must divide by abundance. If have mask, some of those should not be
+            # counted, because they were set to zero above and should not contribute to the average.
+        radialprofile = tbin / nr
+        if np.isnan(radialprofile).any():
+            print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+            radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
+
+        radial_profile_all.append(radialprofile)
+
+    # now average all radial profiles, need to pad all to the longest one
+    maxlength = max([len(rp) for rp in radial_profile_all])
+    print(maxlength, len(radial_profile_all))
+    averaged_radial_profile = np.zeros((len(radial_profile_all),maxlength))
+    for i1, rp in enumerate(radial_profile_all):
+        averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
+    averaged_radial_profile = averaged_radial_profile.mean(axis=0)
+
+    if plot:
+        fig, ax = plt.subplots()
+        ax.plot(np.arange(averaged_radial_profile.shape[0]) * w.xy_scale, averaged_radial_profile)
+        ax.set_ylim([0., ax.get_ylim()[1]])
+        ax.set_xlim([0., ax.get_xlim()[1] / np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
+        ax.set_xlabel('distance ($\mu m$)', fontsize=w.fontsize)
+        ax.set_ylabel(str(channel_id) + ' intensity', fontsize=w.fontsize)
+        # where there is no colony anyway
+        nice_spines(ax)
+
+    return np.arange(averaged_radial_profile.shape[0]) * w.xy_scale, averaged_radial_profile
+
+
+def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_selected_cells=False, fontsize=16):
+    """
+
+    :param w_list: watershed object or list of objects
+    :param channel_id:
+    :param nbins: number of bins
+    :param plot:
+    :param only_selected_cells:
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    r_all = np.zeros((0,))
+    i_all = np.zeros((0,))
+
+    for w in w_list:
+        index = w._get_indices(only_selected_cells)
+
+        indx_change = 0 if w.image_dim == 3 else 1
+
+        x = np.vstack(w.df.centroid[index].values.flat)[:, 1 - indx_change]
+        y = np.vstack(w.df.centroid[index].values.flat)[:, 2 - indx_change]
+        i = w.df[channel_id][index].values
+
+        r = np.sqrt((x - w.center[1 - indx_change]) ** 2 + (y - w.center[2 - indx_change]) ** 2)
+
+        r_all = np.hstack((r_all, r))
+        i_all = np.hstack((i_all, i))
+
+    n, xn = np.histogram(r_all, bins=nbins, weights=i_all)
+    n2, _ = np.histogram(r_all, bins=nbins)
+
+    if plot:
+        _, ax = plt.subplots()
+        ax.step(xn[:-1] - xn[0], n / n2, where='mid')
+        ax.fill_between(xn[:-1] - xn[0], n / n2, alpha=0.2, step='mid')
+        ax.set_xlabel('r', fontsize=fontsize)
+        ax.set_ylabel(channel_id, fontsize=fontsize)
+        nice_spines(ax)
+
+    return xn[:-1] - xn[0], n / n2
+
+
+def dot_plot(w_list, channel_id, colormap_cutoff=0.5, only_selected_cells=False, markersize=30):
+    """
+    Dot-plot as in Warmflash et al.
+
+    :param w_list: watershed object or list of objects
+    :param channel_id:
+    :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
+    :param only_selected_cells:
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    x_all = np.zeros((0,))
+    y_all = np.zeros((0,))
+    c_all = np.zeros((0,))
+
+    for w in w_list:
+
+        if w.image_dim == 3:
+            indices = (1, 2)
+        else:
+            indices = (0, 1)
+
+        index = w._get_indices(only_selected_cells)
+        x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[indices[0]]
+        y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[indices[1]]
+        c = w.df[channel_id][index].values
+
+        x_all = np.hstack((x_all, x))
+        y_all = np.hstack((y_all, y))
+        c_all = np.hstack((c_all, c))
+
+    fig, ax = plt.subplots()
+    cax = ax.scatter(x_all, y_all, c=c_all, s=markersize,
+                     edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff * c_all.max())
+    nice_spines(ax)
+    ax.autoscale(tight=1)
+    ax.set_aspect('equal')
+    fig.colorbar(cax)
+
+
+def coexpression_per_cell(w_list, channel_id1, channel_id2, only_selected_cells=False, fontsize=16):
+    """
+    Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
+
+    :param w_list: watershed object or list of objects
+    :param channel_id1:
+    :param channel_id2:
+    :param only_selected_cells:
+    :param fontsize: fontsize for plotting
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    ch1_all = np.zeros((0,))
+    ch2_all = np.zeros((0,))
+
+    for w in w_list:
+        index = w._get_indices(only_selected_cells)
+        ch1 = w.df[channel_id1][index].values
+        ch2 = w.df[channel_id2][index].values
+        ch1_all = np.hstack((ch1_all, ch1))
+        ch2_all = np.hstack((ch2_all, ch2))
+
+    fig, ax = plt.subplots()
+    ax.scatter(ch1, ch2, edgecolors='none', c='k', alpha=0.8)
+    nice_spines(ax)
+    ax.set_xlabel(channel_id1, fontsize=fontsize)
+    ax.set_ylabel(channel_id2, fontsize=fontsize)
+    ax.autoscale(tight=1)
+
+
+def coexpression_per_pixel(w_list, channel_id1, channel_id2, downsample=1, only_selected_cells=False, fontsize=16,
+                           lognorm=True, bins=50):
+    """
+    Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one nuclear pixel.
+
+    :param w_list: watershed object or list of objects
+    :param channel_id1:
+    :param channel_id2:
+    :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
+    :param only_selected_cells:
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    ch1_all = np.zeros((0,))
+    ch2_all = np.zeros((0,))
+
+    for w in w_list:
+        ch1 = w.channels_image[channel_id1]
+        ch2 = w.channels_image[channel_id2]
+
+        if only_selected_cells:
+            mask = w.mask_selected
+        else:
+            mask = w.mask
+
+        ch1_all = np.hstack((ch1_all, ch1[mask>0][::downsample]))
+        ch2_all = np.hstack((ch2_all, ch2[mask>0][::downsample]))
+
+    fig, ax = plt.subplots()
+    # ax.scatter(ch1_all, ch2_all, marker='o', edgecolors='none', c='k', alpha=0.8, s=4)
+    if lognorm:
+        plt.hist2d(ch1_all, ch2_all, bins=bins, norm=LogNorm())
+    else:
+        plt.hist2d(ch1_all, ch2_all, bins=bins)
+    nice_spines(ax)
+    ax.set_xlabel(channel_id1, fontsize=fontsize)
+    ax.set_ylabel(channel_id2, fontsize=fontsize)
+    ax.autoscale(tight=1)
+
+
+def z_heat_map(w, plot=True):
+    """
+    make a heat map of the z-position
+    :return:
+    """
+
+    # make an index array of the same shape as image, but with z-index as value
+    index_array = np.rollaxis(np.tile(np.arange(w.mask.shape[0]), (w.mask.shape[1], w.mask.shape[2], 1)),
+                              2, 0)
+    z_extent = np.max(index_array * w.mask, axis=0)
+
+    if plot:
+        plt.imshow(z_extent)
+        plt.colorbar()
+
+    return z_extent
+
+
+def radial_z_height(w_list, binsize=20, plot=True, fontsize=16):
+    """
+    Get radial height
+
+    :param channel_id:
+    :param only_selected_nuclei:
+    :param plot:
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    radial_z_all = []
+
+    for w in w_list:
+        data = w.z_heat_map(plot=False)
+
+        if w.image_dim == 3:
+            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+            r = np.sqrt((x - w.center[1]) ** 2 + (y - w.center[2]) ** 2)
+            r = r.astype(np.int)
+        else:
+            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+            r = np.sqrt((x - w.center[0]) ** 2 + (y - w.center[1]) ** 2)
+            r = r.astype(np.int)
+
+        tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
+        nr = np.bincount(r.ravel())
+        radialprofile = tbin / nr
+
+        if np.isnan(radialprofile).any():
+            print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+            radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
+
+        radial_z_all.append(radialprofile)
+
+    maxlength = max([len(rp) for rp in radial_z_all])
+    averaged_radial_profile = np.zeros((len(radial_z_all),maxlength))
+    for i1, rp in enumerate(radial_z_all):
+        averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
+    averaged_radial_profile = averaged_radial_profile.mean(axis=0)
+
+    rvec = np.arange(averaged_radial_profile.shape[0]) * w.xy_scale
+
+    # smooth a bit
+    averaged_radial_profile = running_mean(averaged_radial_profile, binsize)
+    rvec = rvec[:averaged_radial_profile.shape[0]]
+
+    if plot:
+        fig, ax = plt.subplots()
+        ax.plot(rvec, averaged_radial_profile)
+        ax.set_ylim([0., ax.get_ylim()[1]])
+        ax.set_xlim([0., ax.get_xlim()[1] / np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
+        ax.set_xlabel('distance ($\mu m$)', fontsize=fontsize)
+        ax.set_ylabel('z', fontsize=fontsize)
+        nice_spines(ax)
+
+    return rvec, averaged_radial_profile
+
+
+def scatter_expression_z(w_list, channel_id, downsample=1, only_selected_cells=False, fontsize=16,
+                         bins=100, lognorm=False, expression_max=None):
+    """
+    Scatter plot visualizing expression of channel and z-location
+    pixel.
+
+    :param w_list: watershed object or list of objects
+    :param channel_id:
+    :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
+    :param only_selected_cells:
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    ch1_all = np.zeros((0,))
+    z_all = np.zeros((0,))
+
+    for w in w_list:
+
+        if only_selected_cells:
+            mask = w.mask_selected
+        else:
+            mask = w.mask
+
+        ch1 = w.channels_image[channel_id]
+        z = np.rollaxis(np.tile(np.arange(w.mask.shape[0]), (w.mask.shape[1], w.mask.shape[2], 1)), 2, 0)
+
+        ch1_all = np.hstack((ch1_all, ch1[mask>0][::downsample]))
+        z_all = np.hstack((z_all, z[mask>0][::downsample]))
+
+    fig, ax = plt.subplots()
+    # ax.scatter(ch1_all, z_all, marker='o', edgecolors='none', c='k', alpha=0.8, s=4)
+    zbins = np.arange(z_all.max())
+
+    if expression_max is not None:
+        z_all = z_all[ch1_all < expression_max]
+        ch1_all = ch1_all[ch1_all < expression_max]
+    if lognorm:
+        ax.hist2d(ch1_all, z_all, bins=[bins,zbins], norm=LogNorm())
+    else:
+        ax.hist2d(ch1_all, z_all, bins=[bins, zbins])
+
+    # if expression_max is not None:
+    #     ax.set_xlim(ax.get_xlim()[0], expression_max)
+    #     print(ax.get_xlim()[0], expression_max)
+
+    nice_spines(ax)
+    ax.set_xlabel(channel_id, fontsize=fontsize)
+    ax.set_ylabel('z', fontsize=fontsize)
+    ax.autoscale(tight=1)
+
+
+def expression_histogram(w_list, channel_id, only_selected_cells=False, bins=50, log=False):
+    """
+    histogram of a certain channel, can use that to determine threshold
+
+    :param w:
+    :param channel_id:
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    ch1_all = np.zeros((0,))
+
+    for w in w_list:
+
+        if only_selected_cells:
+            mask = w.mask_selected
+        else:
+            mask = w.mask
+
+        ch1 = w.channels_image[channel_id]
+        ch1_all = np.hstack((ch1_all, ch1[mask>0]))
+
+        with plt.style.context('ggplot'):
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.hist(ch1_all, log=log, bins=np.arange(0, ch1_all.max(), bins), range=(0, ch1_all.max()))
+            ax.set_ylabel(channel_id, fontsize=16)
+
+
+def expression_map(w, channel_id, threshold, only_selected_cells=False, colormap_cutoff=.2):
+    """
+    make a 2d map of where expression above threshold is
+
+    :param w_list:
+    :param channel_id:
+    :param threshold:
+    :return:
+    """
+
+    if only_selected_cells:
+        mask = w.mask_selected
+    else:
+        mask = w.mask
+
+    ch1 = w.channels_image[channel_id]
+    ch1_thresh_project = ch1.sum(axis=0)* np.ma.masked_where((ch1 < threshold) | (mask < 0), ch1).sum(axis=0)
+    fig, ax = plt.subplots()
+    ax.imshow(ch1_thresh_project, vmax=colormap_cutoff * ch1_thresh_project.max())
+
+
+def co_expression_map(w, channel_id1, channel_id2, threshold1, threshold2, only_selected_cells=False,
+                     colormap_cutoff=.2):
+    """
+    make a 2d map of where expression above threshold is
+
+    :param w_list:
+    :param channel_id:
+    :param threshold:
+    :return:
+    """
+
+    if only_selected_cells:
+        mask = w.mask_selected
+    else:
+        mask = w.mask
+
+    ch1 = w.channels_image[channel_id1]
+    ch2 = w.channels_image[channel_id2]
+
+    combined = (ch1*ch2).mean(axis=0)
+    ch_combined_thresh_project = combined * \
+                         np.ma.masked_where((ch1 < threshold1) | (ch2 < threshold2) | (mask < 0),
+                                                                       ch1*ch2).mean(axis=0)
+    fig, ax = plt.subplots()
+    ax.imshow(ch_combined_thresh_project, vmax=colormap_cutoff * ch_combined_thresh_project.max())
+
+
+
+def make_iterable(a):
+    try:
+        len(a)
+        return a
+    except TypeError:
+        return [a]
+
+
+def nice_spines(ax, grid=True):
+    ax.grid(grid)
+    gridlines = ax.get_xgridlines() + ax.get_ygridlines()
+    for line in gridlines:
+        line.set_linestyle('-')
+        line.set_linewidth(.1)
+
+    spines_to_remove = ['top', 'right']
+    spines_to_keep = ['bottom', 'left']
+    rcParams['xtick.direction'] = 'out'
+    rcParams['ytick.direction'] = 'out'
+    almost_black = '#262626'
+
+    for spine in spines_to_remove:
+        ax.spines[spine].set_visible(False)
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+    for spine in spines_to_keep:
+        ax.spines[spine].set_linewidth(0.5)
+        ax.spines[spine].set_color(almost_black)
+
+def running_mean(x, N):
+    # http://stackoverflow.com/questions/13728392/moving-average-or-running-mean
+    cumsum = np.cumsum(np.insert(x, 0, 0))
+    return (cumsum[N:] - cumsum[:-N]) / N
