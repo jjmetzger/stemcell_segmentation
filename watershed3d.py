@@ -407,7 +407,7 @@ class Ws3d(object):
             markers = ndi.label(self.peak_array)[0]
 
             # check for version because compactness is only available in watershed > 0.12
-            if LooseVersion(skimage.__version__) > LooseVersion('0.12'):
+            if LooseVersion(skimage.__version__) >= LooseVersion('0.13dev'):
                 self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask, compactness=compactness)
             else:
                 self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
