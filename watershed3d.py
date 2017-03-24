@@ -37,7 +37,7 @@ class Ws3d(object):
         detection.
 
         :param imagefile: File to segment
-        :param xy_scale: scale in micrometer of the x and y pixels
+        :param xy_scale: scale in micrometer of the x and y pixels. E.g. 1000um and 800 pixels this should be 800/1000
         :param z_scale: same as above for z
         """
 
@@ -407,7 +407,7 @@ class Ws3d(object):
             markers = ndi.label(self.peak_array)[0]
 
             # check for version because compactness is only available in watershed > 0.12
-            if LooseVersion(skimage.__version__) >= LooseVersion('0.13dev'):
+            if LooseVersion(skimage.__version__) > LooseVersion('0.13'):
                 self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask, compactness=compactness)
             else:
                 self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
@@ -598,13 +598,13 @@ class Ws3d(object):
             for ax in ax1.ravel():
                 ax.set_xticks(ax.get_xticks()[::2])
             plt.suptitle('before selection of nuclei')
-            plt.tight_layout()
+            #plt.tight_layout()
 
             ax1 = self.df[self.df.good_nuclei].hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
             for ax in ax1.ravel():
                 ax.set_xticks(ax.get_xticks()[::2])
             plt.suptitle('after selection of nuclei')
-            plt.tight_layout()
+            #plt.tight_layout()
 
 
 
@@ -625,7 +625,7 @@ class Ws3d(object):
                 ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower')
             ax.set_title('after selection of good nuclei')
 
-    def apply_to_channels(self, filename, channel_id, remove_background=False):
+    def apply_to_channels(self, filename, channel_id, remove_background=True):
         """
         Apply nuclear marker to other channels.
 
@@ -640,7 +640,7 @@ class Ws3d(object):
 
         im = io.imread(filename)
         if remove_background:
-            im = self.remove_background(im)
+            im = remove_background_func(im)
 
         if self.ws.shape != im.shape:
             raise RuntimeError('image shapes are not the same, original is ' + str(self.ws.shape) + ' and to be '
@@ -662,7 +662,13 @@ class Ws3d(object):
         find center of mass
         """
 
-        self.center = np.array(center_of_mass(np.abs(self.image_stack)))
+        #self.center = np.array(center_of_mass(np.abs(self.image_stack)))
+        # take middle of stack        
+        middle = int(np.round(self.image_stack.shape[0] /2))
+        center_xy = np.array(center_of_mass(np.abs(self.image_stack[middle])))
+        self.center = np.array([0., center_xy[0], center_xy[1]])
+        
+        
 
     def _get_indices(self, only_selected_cells):
         if only_selected_cells:
@@ -869,7 +875,7 @@ class Ws3d(object):
         z_extent = np.max(index_array * self.mask, axis=0)
 
         if plot:
-            plt.imshow(z_extent)
+            plt.imshow(z_extent, cmap='viridis')
             plt.colorbar()
 
         return z_extent
@@ -903,7 +909,7 @@ class Ws3d(object):
             print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
             radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
 
-        rvec = np.arange(radialprofile.shape[0])*self.xy_scale
+        rvec = np.arange(radialprofile.shape[0])/self.xy_scale
 
         # smooth a bit
         radialprofile = self.running_mean(radialprofile, 20)
@@ -920,35 +926,6 @@ class Ws3d(object):
 
         return rvec, radialprofile
 
-    # static methods
-    @staticmethod
-    def remove_background(im, n=None):
-        """
-        basic method to remove background, returns background subtracted image
-
-        :param im: image
-        :param n: lowest non-zero n pixels are used to estimate background
-        :return: background subtracted image
-        """
-        # TODO: check whether this can make negative intensities
-
-        if im.ndim == 3:
-            imm = im.mean(axis=0)
-        elif im.ndim == 2:
-            imm = im.copy()
-        else:
-            raise RuntimeError("image has neither dimension 2 or 3")
-        # following in comments has a bug
-        # im -= np.partition(imm[imm.nonzero()], n)[:n].mean().astype(im.dtype)
-        # im[im<0.] = 0.  # set negatives to 0
-        # return im
-
-        if n is None:
-            if im.ndim == 2:
-                n = 100
-            else:
-                n = 1000
-        return im - np.partition(imm[imm.nonzero()], n)[:n].mean()  # fast way of getting lowest n nonzero values
 
     @staticmethod
     def myrandom_cmap(seed=None, return_darker=False, n=1024):
@@ -992,7 +969,40 @@ class Ws3d(object):
         return (cumsum[N:] - cumsum[:-N]) / N
 
 
-def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True):
+# static methods
+#@staticmethod
+def remove_background_func(im, n=None):
+    """
+    basic method to remove background, returns background subtracted image
+
+    :param im: image
+    :param n: lowest non-zero n pixels are used to estimate background
+    :return: background subtracted image
+    """
+    # TODO: check whether this can make negative intensities
+
+    if im.ndim == 3:
+        imm = im.mean(axis=0)
+    elif im.ndim == 2:
+        imm = im.copy()
+    else:
+        raise RuntimeError("image has neither dimension 2 or 3")
+    # following in comments has a bug
+    # im -= np.partition(imm[imm.nonzero()], n)[:n].mean().astype(im.dtype)
+    # im[im<0.] = 0.  # set negatives to 0
+    # return im
+
+    if n is None:
+#            if im.ndim == 2:
+#                n = 100
+#            else:
+#                n = 1000
+        n = int(0.028 * im.shape[0]*im.shape[1]*im.shape[2])
+
+    return im - np.partition(imm[imm.nonzero()], n)[:n].max()  # fast way of getting lowest n nonzero values
+
+
+def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, binsize=None, filename=None, xcutoff=None):
     """
     Get radial intensity either for all nuclei or only selected ones. This uses the pixel information,
     not the segmentation.
@@ -1025,7 +1035,7 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True):
             x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
             r = np.sqrt((x - w.center[0]) ** 2 + (y - w.center[1]) ** 2)
             r = r.astype(np.int)
-
+        
         tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
 
         if mask is None:
@@ -1037,30 +1047,57 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True):
             # counted, because they were set to zero above and should not contribute to the average.
         radialprofile = tbin / nr
         if np.isnan(radialprofile).any():
-            print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+            #print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
             radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
 
         radial_profile_all.append(radialprofile)
 
     # now average all radial profiles, need to pad all to the longest one
     maxlength = max([len(rp) for rp in radial_profile_all])
-    print(maxlength, len(radial_profile_all))
+    #print(maxlength, len(radial_profile_all), maxlength/w.xy_scale)
     averaged_radial_profile = np.zeros((len(radial_profile_all),maxlength))
+    running_mean_vec_length = running_mean(averaged_radial_profile[0], binsize).shape[0]
+    averaged_radial_profile_rm = np.zeros((len(radial_profile_all), running_mean_vec_length))
+    
     for i1, rp in enumerate(radial_profile_all):
         averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
-    averaged_radial_profile = averaged_radial_profile.mean(axis=0)
-
+        averaged_radial_profile_rm[i1] = running_mean(averaged_radial_profile[i1], binsize)
+        
+    if binsize is None:
+        averaged_radial_profile = averaged_radial_profile.mean(axis=0)
+        averaged_radial_profile_std = averaged_radial_profile.std(axis=0)
+    else:
+        averaged_radial_profile = averaged_radial_profile_rm.mean(axis=0)
+        averaged_radial_profile_std = averaged_radial_profile_rm.std(axis=0)
+        
+#==============================================================================
+#     if binsize is not None:
+#         averaged_radial_profile = running_mean(averaged_radial_profile, binsize)
+#         averaged_radial_profile_std = running_mean(averaged_radial_profile_std, binsize)
+# 
+#==============================================================================
     if plot:
         fig, ax = plt.subplots()
-        ax.plot(np.arange(averaged_radial_profile.shape[0]) * w.xy_scale, averaged_radial_profile)
+        xx, yy = np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
+        ax.plot(xx, yy)
+        ax.fill_between(xx, yy+averaged_radial_profile_std, yy-averaged_radial_profile_std, alpha=0.2)
+
+        #ax.errorbar(np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile, yerr=averaged_radial_profile_std)
+        
         ax.set_ylim([0., ax.get_ylim()[1]])
-        ax.set_xlim([0., ax.get_xlim()[1] / np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
+        if xcutoff is not None:
+            ax.set_xlim(0, xcutoff)
+        #ax.set_xlim([0., ax.get_xlim()[1] / np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
         ax.set_xlabel('distance ($\mu m$)', fontsize=w.fontsize)
         ax.set_ylabel(str(channel_id) + ' intensity', fontsize=w.fontsize)
         # where there is no colony anyway
         nice_spines(ax)
 
-    return np.arange(averaged_radial_profile.shape[0]) * w.xy_scale, averaged_radial_profile
+    # save to file
+    if filename is not None:
+        np.savetxt(filename, np.vstack((np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile, averaged_radial_profile_std)).transpose(), delimiter=',')
+               
+    return np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
 
 
 def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_selected_cells=False, fontsize=16):
@@ -1103,7 +1140,11 @@ def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_select
         ax.set_ylabel(channel_id, fontsize=fontsize)
         nice_spines(ax)
 
-    return xn[:-1] - xn[0], n / n2
+    # make sure to replace nans by 0.
+    return_vec = n/n2
+    return_vec[np.isnan(return_vec)] = 0.
+    
+    return xn[:-1] - xn[0], return_vec
 
 
 def dot_plot(w_list, channel_id, colormap_cutoff=0.5, only_selected_cells=False, markersize=30):
@@ -1139,8 +1180,8 @@ def dot_plot(w_list, channel_id, colormap_cutoff=0.5, only_selected_cells=False,
         c_all = np.hstack((c_all, c))
 
     fig, ax = plt.subplots()
-    cax = ax.scatter(x_all, y_all, c=c_all, s=markersize,
-                     edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff * c_all.max())
+    cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all/c_all.max()*1000, s=markersize,
+                     edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*1000)
     nice_spines(ax)
     ax.autoscale(tight=1)
     ax.set_aspect('equal')
@@ -1188,6 +1229,7 @@ def coexpression_per_pixel(w_list, channel_id1, channel_id2, downsample=1, only_
     :param channel_id2:
     :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
     :param only_selected_cells:
+    :param lognorm: do a log plot  
     :return:
     """
 
@@ -1237,7 +1279,7 @@ def z_heat_map(w, plot=True):
     return z_extent
 
 
-def radial_z_height(w_list, binsize=20, plot=True, fontsize=16):
+def radial_z_height(w_list, binsize=20, plot=True, fontsize=16, filename=None):
     """
     Get radial height
 
@@ -1278,7 +1320,7 @@ def radial_z_height(w_list, binsize=20, plot=True, fontsize=16):
         averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
     averaged_radial_profile = averaged_radial_profile.mean(axis=0)
 
-    rvec = np.arange(averaged_radial_profile.shape[0]) * w.xy_scale
+    rvec = np.arange(averaged_radial_profile.shape[0]) / w.xy_scale
 
     # smooth a bit
     averaged_radial_profile = running_mean(averaged_radial_profile, binsize)
@@ -1293,6 +1335,10 @@ def radial_z_height(w_list, binsize=20, plot=True, fontsize=16):
         ax.set_ylabel('z', fontsize=fontsize)
         nice_spines(ax)
 
+    # save to file
+    if filename is not None:
+        np.savetxt(filename, np.vstack((rvec, averaged_radial_profile)).transpose(), delimiter=',')
+        
     return rvec, averaged_radial_profile
 
 
