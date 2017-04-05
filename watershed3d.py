@@ -1010,6 +1010,9 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
     :param channel_id:
     :param only_selected_nuclei:
     :param plot:
+    :param binsize:
+    :param filename: if specified, write the data (r, radial_intensity) to a txt file
+    :param xcutoff:
     :return:
     """
 
@@ -1054,14 +1057,17 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
 
     # now average all radial profiles, need to pad all to the longest one
     maxlength = max([len(rp) for rp in radial_profile_all])
-    #print(maxlength, len(radial_profile_all), maxlength/w.xy_scale)
+
     averaged_radial_profile = np.zeros((len(radial_profile_all),maxlength))
-    running_mean_vec_length = running_mean(averaged_radial_profile[0], binsize).shape[0]
-    averaged_radial_profile_rm = np.zeros((len(radial_profile_all), running_mean_vec_length))
+
+    if binsize is not None:
+        running_mean_vec_length = running_mean(averaged_radial_profile[0], binsize).shape[0]
+        averaged_radial_profile_rm = np.zeros((len(radial_profile_all), running_mean_vec_length))
     
     for i1, rp in enumerate(radial_profile_all):
         averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
-        averaged_radial_profile_rm[i1] = running_mean(averaged_radial_profile[i1], binsize)
+        if binsize is not None:
+            averaged_radial_profile_rm[i1] = running_mean(averaged_radial_profile[i1], binsize)
         
     if binsize is None:
         averaged_radial_profile = averaged_radial_profile.mean(axis=0)
@@ -1069,18 +1075,13 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
     else:
         averaged_radial_profile = averaged_radial_profile_rm.mean(axis=0)
         averaged_radial_profile_std = averaged_radial_profile_rm.std(axis=0)
-        
-#==============================================================================
-#     if binsize is not None:
-#         averaged_radial_profile = running_mean(averaged_radial_profile, binsize)
-#         averaged_radial_profile_std = running_mean(averaged_radial_profile_std, binsize)
-# 
-#==============================================================================
+
     if plot:
         fig, ax = plt.subplots()
         xx, yy = np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
         ax.plot(xx, yy)
-        ax.fill_between(xx, yy+averaged_radial_profile_std, yy-averaged_radial_profile_std, alpha=0.2)
+        if len(w_list) > 1: # only makes sense to plot std when there are several colonies to average over
+            ax.fill_between(xx, yy+averaged_radial_profile_std, yy-averaged_radial_profile_std, alpha=.2)
 
         #ax.errorbar(np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile, yerr=averaged_radial_profile_std)
         
@@ -1147,14 +1148,19 @@ def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_select
     return xn[:-1] - xn[0], return_vec
 
 
-def dot_plot(w_list, channel_id, colormap_cutoff=0.5, only_selected_cells=False, markersize=30):
+def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False):
     """
     Dot-plot as in Warmflash et al.
 
     :param w_list: watershed object or list of objects
     :param channel_id:
+    :param color_range: color range, overrides colormap_cutoff
     :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
     :param only_selected_cells:
+    :param markersize:
+    :param colorbar: whether to plot a colorbar
+    :param r_limit: only plot cells smaller than this radius (in um)
+    :param axis: plot axes or not
     :return:
     """
 
@@ -1175,17 +1181,30 @@ def dot_plot(w_list, channel_id, colormap_cutoff=0.5, only_selected_cells=False,
         y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[indices[1]]
         c = w.df[channel_id][index].values
 
+        if r_limit is not None:
+            index_smaller_than_r = (x**2 + y**2)<r_limit**2
+            x = x[index_smaller_than_r]
+            y = y[index_smaller_than_r]
+            c = c[index_smaller_than_r]
+
         x_all = np.hstack((x_all, x))
         y_all = np.hstack((y_all, y))
         c_all = np.hstack((c_all, c))
 
     fig, ax = plt.subplots()
-    cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all/c_all.max()*1000, s=markersize,
-                     edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*1000)
-    nice_spines(ax)
+    if color_range:
+        cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all, s=markersize,
+                         edgecolors='none', cmap=plt.cm.viridis, vmin=color_range[0], vmax=color_range[1])
+    else:
+        cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all/c_all.max()*1000, s=markersize,
+                         edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*1000)
+    nice_spines(ax, grid=False)
     ax.autoscale(tight=1)
     ax.set_aspect('equal')
-    fig.colorbar(cax)
+    if not axis:
+        ax.axis('off')
+    if colorbar:
+        fig.colorbar(cax)
 
 
 def coexpression_per_cell(w_list, channel_id1, channel_id2, only_selected_cells=False, fontsize=16):
@@ -1279,7 +1298,7 @@ def z_heat_map(w, plot=True):
     return z_extent
 
 
-def radial_z_height(w_list, binsize=20, plot=True, fontsize=16, filename=None):
+def radial_z_height(w_list, z_scale=None, binsize=20, plot=True, fontsize=16, filename=None):
     """
     Get radial height
 
@@ -1328,11 +1347,17 @@ def radial_z_height(w_list, binsize=20, plot=True, fontsize=16, filename=None):
 
     if plot:
         fig, ax = plt.subplots()
-        ax.plot(rvec, averaged_radial_profile)
+        if z_scale is None:
+            ax.plot(rvec, averaged_radial_profile)
+        else:
+            ax.plot(rvec, z_scale * averaged_radial_profile)
         ax.set_ylim([0., ax.get_ylim()[1]])
         ax.set_xlim([0., ax.get_xlim()[1] / np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
         ax.set_xlabel('distance ($\mu m$)', fontsize=fontsize)
-        ax.set_ylabel('z', fontsize=fontsize)
+        if z_scale is None:
+            ax.set_ylabel('z', fontsize=fontsize)
+        else:
+            ax.set_ylabel('z ($\mu m$)', fontsize=fontsize)
         nice_spines(ax)
 
     # save to file
@@ -1469,6 +1494,35 @@ def co_expression_map(w, channel_id1, channel_id2, threshold1, threshold2, only_
     fig, ax = plt.subplots()
     ax.imshow(ch_combined_thresh_project, vmax=colormap_cutoff * ch_combined_thresh_project.max())
 
+
+def zview(w, cell_based=False, filename=None):
+    """
+    make a cut through the colony
+    :param w: colony object
+    :param cell_based: Color according to segmentation and the z-centroids. This may look nicer depending on the quality of the segmentation. Much slower.
+    :param filename: filename to save
+    :return:
+    """
+
+    if cell_based:
+        # go through each index and change value according to z-position
+        b = np.zeros(w.ws.shape)
+        for i1 in range(1,w.ws.max()+1):
+            # if i1 % 100 == 0:
+            #     print(i1)
+            b[w.ws == i1] = w.df.iloc[i1 - 1].centroid[0]
+
+    else:
+        b = np.zeros(w.ws.shape, dtype=np.int)
+        for i1 in range(b.shape[0]):
+            b[i1] = i1
+
+    wm = np.ma.masked_where(~w.mask, b)
+    fig, ax = plt.subplots(figsize=(10,1))
+    ax.imshow(wm[::-1, int(w.center[1]), :], cmap='copper_r')
+    ax.axis('off')
+    if filename is not None:
+        fig.savefig(filename)
 
 
 def make_iterable(a):
