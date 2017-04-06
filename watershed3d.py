@@ -1148,7 +1148,7 @@ def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_select
     return xn[:-1] - xn[0], return_vec
 
 
-def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False):
+def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None):
     """
     Dot-plot as in Warmflash et al.
 
@@ -1192,7 +1192,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         c_all = np.hstack((c_all, c))
 
     fig, ax = plt.subplots()
-    if color_range:
+    if color_range is not None:
         cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all, s=markersize,
                          edgecolors='none', cmap=plt.cm.viridis, vmin=color_range[0], vmax=color_range[1])
     else:
@@ -1205,6 +1205,9 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         ax.axis('off')
     if colorbar:
         fig.colorbar(cax)
+
+    if filename is not None:
+        fig.savefig(filename)
 
 
 def coexpression_per_cell(w_list, channel_id1, channel_id2, only_selected_cells=False, fontsize=16):
@@ -1239,7 +1242,7 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, only_selected_cells=
 
 
 def coexpression_per_pixel(w_list, channel_id1, channel_id2, downsample=1, only_selected_cells=False, fontsize=16,
-                           lognorm=True, bins=50):
+                           lognorm=False, bins=50, gates=None):
     """
     Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one nuclear pixel.
 
@@ -1248,7 +1251,9 @@ def coexpression_per_pixel(w_list, channel_id1, channel_id2, downsample=1, only_
     :param channel_id2:
     :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
     :param only_selected_cells:
-    :param lognorm: do a log plot  
+    :param lognorm: do a log plot
+    :param bins: number of bins
+    :param gates: put gates on the expressions and get percentages
     :return:
     """
 
@@ -1268,12 +1273,35 @@ def coexpression_per_pixel(w_list, channel_id1, channel_id2, downsample=1, only_
         ch1_all = np.hstack((ch1_all, ch1[mask>0][::downsample]))
         ch2_all = np.hstack((ch2_all, ch2[mask>0][::downsample]))
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(6,6))
     # ax.scatter(ch1_all, ch2_all, marker='o', edgecolors='none', c='k', alpha=0.8, s=4)
+
+    # gates
+    if gates is not None:
+        assert(len(gates)==2)
+        # count the number of cells below and above thresholds
+        l1_l2 = (np.bitwise_and(ch1_all < gates[0], ch2_all < gates[1])).sum()  # low 1 low 2
+        h1_l2 = (np.bitwise_and(ch1_all >= gates[0], ch2_all < gates[1])).sum()  # high 1 low 2
+        l1_h2 = (np.bitwise_and(ch1_all < gates[0], ch2_all >= gates[1])).sum()  # low 1 high 2
+        h1_h2 = (np.bitwise_and(ch1_all >= gates[0], ch2_all >= gates[1])).sum()  # high 1 high 2
+        total_count = l1_l2 + h1_l2 + l1_h2 + h1_h2
+        assert(total_count == len(ch1_all))
+        # print((np.array([l1_l2, h1_l2, l1_h2, h1_h2]/total_count)*100).round())
+        print(channel_id1, '<', gates[0], 'and', channel_id2, '<', gates[1], '=', '{:.2f}%'.format(l1_l2/total_count*100))
+        print(channel_id1, '>', gates[0], 'and', channel_id2, '<', gates[1], '=', '{:.2f}%'.format(h1_l2/total_count*100))
+        print(channel_id1, '<', gates[0], 'and', channel_id2, '>', gates[1], '=', '{:.2f}%'.format(l1_h2/total_count*100))
+        print(channel_id1, '>', gates[0], 'and', channel_id2, '>', gates[1], '=', '{:.2f}%'.format(h1_h2/total_count*100))
+
     if lognorm:
-        plt.hist2d(ch1_all, ch2_all, bins=bins, norm=LogNorm())
+        plt.hist2d(ch1_all, ch2_all, bins=bins, norm=LogNorm(), cmap='magma_r')
     else:
-        plt.hist2d(ch1_all, ch2_all, bins=bins)
+        d, x, y = np.histogram2d(ch1_all, ch2_all, bins=bins)
+        d_masked = np.ma.masked_where(d == 0, d)  # mask zero bins in plot
+        ax.imshow(d_masked.T, extent=[x[0], x[-1], y[0], y[-1]], cmap='magma_r', origin='low')
+    if gates is not None:
+        ax.axvline(x=gates[0], color='k', ls='--', lw=1.3)
+        ax.axhline(y=gates[1], color='k', ls='--', lw=1.3)
+        # plt.hist2d(ch1_all, ch2_all, bins=bins)
     nice_spines(ax)
     ax.set_xlabel(channel_id1, fontsize=fontsize)
     ax.set_ylabel(channel_id2, fontsize=fontsize)
@@ -1507,10 +1535,11 @@ def zview(w, cell_based=False, filename=None):
     if cell_based:
         # go through each index and change value according to z-position
         b = np.zeros(w.ws.shape)
-        for i1 in range(1,w.ws.max()+1):
+        for i1 in range(w.df.shape[0]):
+        # for i1 in range(1,w.ws.max()+1):
             # if i1 % 100 == 0:
             #     print(i1)
-            b[w.ws == i1] = w.df.iloc[i1 - 1].centroid[0]
+            b[w.ws == w.df.iloc[i1].name] = w.df.iloc[i1].centroid[0]  # "name" is the index of the watershed, aka "cell_id"
 
     else:
         b = np.zeros(w.ws.shape, dtype=np.int)
