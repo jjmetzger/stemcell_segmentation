@@ -1026,7 +1026,8 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
             mask = w.mask_selected
         else:
             mask = w.mask
-        data[~mask] = 0  # set all False values to 0
+        data[~mask] = 0  # set all False values to 0 - doesnt seem to have an effect anyway
+        # data = data[~mask]   # set all False values to 0
 
         if w.image_dim == 3:
             x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
@@ -1101,6 +1102,131 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
     return np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
 
 
+def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True, binsize=None, filename=None,
+                     xcutoff=None, mask=True):
+    """
+    Get radial intensity AS A FUNCTION OF Z, either for all nuclei or only selected ones. This uses the pixel information,
+    not the segmentation.
+
+    :param channel_id:
+    :param only_selected_nuclei:
+    :param plot:
+    :param binsize:
+    :param filename: if specified, write the data (r, radial_intensity) to a txt file
+    :param xcutoff:
+    :return:
+    """
+
+    if mask:
+        use_mask = True
+    else:
+        use_mask = False
+
+    w_list = make_iterable(w_list)
+    radial_profile_all = []
+
+    if len(w_list) > 1:
+        raise NotImplementedError('currently not implemented for multiple colonies')
+
+    for w in w_list:
+        data = w.channels_image[channel_id]
+
+        if use_mask:
+            mask = np.ones_like(w.mask)
+        elif only_selected_nuclei:
+            mask = w.mask_selected
+        else:
+            mask = w.mask
+        data[~mask] = 0  # set all False values to 0
+
+        if w.image_dim == 3:
+            x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
+            r = np.sqrt((x - w.center[1]) ** 2 + (y - w.center[2]) ** 2)
+            r = r.astype(np.int)
+            # now make 3d
+            r = np.tile(r, (data.shape[0], 1, 1))
+        else:
+            x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
+            r = np.sqrt((x - w.center[0]) ** 2 + (y - w.center[1]) ** 2)
+            r = r.astype(np.int)
+
+        # split into different z
+        rshape = np.unique(r.ravel()).shape[0]  # this is the r bin vector
+        tbinz = np.zeros((data.shape[0], rshape))
+        # print(tbinz.shape)
+        for zz in range(data.shape[0]):
+            # print(np.bincount(r[zz].ravel(), data[zz].ravel()).shape)
+            tbinz[zz] = np.bincount(r[zz].ravel(), data[zz].ravel())  # bincount makes +1 counts
+
+        # tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
+
+        nrz = np.zeros((data.shape[0], rshape))
+        if mask is None:
+            for zz in range(data.shape[0]):
+                nrz[zz] = np.bincount(r[zz].ravel())
+        else:
+            for zz in range(data.shape[0]):
+                nrz[zz] = np.bincount(r[zz].ravel(), mask[zz].astype(np.int).ravel())  # this line makes the average, i.e. since
+            # we have
+            # more bins with certain r's, must divide by abundance. If have mask, some of those should not be
+            # counted, because they were set to zero above and should not contribute to the average.
+        radialprofilez = tbinz / nrz
+        if np.isnan(radialprofilez).any():
+            # print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+            radialprofilez[np.isnan(radialprofilez)] = 0.  # set these to 0
+
+        radial_profile_all.append(radialprofilez)
+
+    return np.arange(rshape), radial_profile_all
+
+    # now average all radial profiles, need to pad all to the longest one
+    maxlength = max([rp.shape[1] for rp in radial_profile_all])
+
+    averaged_radial_profile = np.zeros((data.shape[0], len(radial_profile_all), maxlength)) # z is first index
+
+    # if binsize is not None:
+    #     running_mean_vec_length = running_mean(averaged_radial_profile[0], binsize).shape[0]
+    #     averaged_radial_profile_rm = np.zeros((len(radial_profile_all), running_mean_vec_length))
+
+    for i1, rp in enumerate(radial_profile_all):
+        averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
+        # if binsize is not None:
+        #     averaged_radial_profile_rm[i1] = running_mean(averaged_radial_profile[i1], binsize)
+
+    if binsize is None:
+        averaged_radial_profile = averaged_radial_profile.mean(axis=0)
+        averaged_radial_profile_std = averaged_radial_profile.std(axis=0)
+    # else:
+    #     averaged_radial_profile = averaged_radial_profile_rm.mean(axis=0)
+    #     averaged_radial_profile_std = averaged_radial_profile_rm.std(axis=0)
+
+    if plot:
+        fig, ax = plt.subplots()
+        xx, yy = np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
+        ax.plot(xx, yy)
+        if len(w_list) > 1:  # only makes sense to plot std when there are several colonies to average over
+            ax.fill_between(xx, yy + averaged_radial_profile_std, yy - averaged_radial_profile_std, alpha=.2)
+
+        # ax.errorbar(np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile, yerr=averaged_radial_profile_std)
+
+        ax.set_ylim([0., ax.get_ylim()[1]])
+        if xcutoff is not None:
+            ax.set_xlim(0, xcutoff)
+        # ax.set_xlim([0., ax.get_xlim()[1] / np.sqrt(2)])  # plot sqrt(2) less far because this is in the corners
+        ax.set_xlabel('distance ($\mu m$)', fontsize=w.fontsize)
+        ax.set_ylabel(str(channel_id) + ' intensity', fontsize=w.fontsize)
+        # where there is no colony anyway
+        nice_spines(ax)
+
+    # save to file
+    if filename is not None:
+        np.savetxt(filename, np.vstack((np.arange(averaged_radial_profile.shape[0]) / w.xy_scale,
+                                        averaged_radial_profile, averaged_radial_profile_std)).transpose(),
+                   delimiter=',')
+
+    return np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
+
+
 def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_selected_cells=False, fontsize=16):
     """
 
@@ -1148,7 +1274,7 @@ def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_select
     return xn[:-1] - xn[0], return_vec
 
 
-def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None):
+def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis):
     """
     Dot-plot as in Warmflash et al.
 
@@ -1192,12 +1318,19 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         c_all = np.hstack((c_all, c))
 
     fig, ax = plt.subplots()
+
+    # sort according to intensity for displaying the high intensity dots on top of the low ones, which just look better
+    sort_array = c_all.argsort()
+    x_all = x_all[sort_array]
+    y_all = y_all[sort_array]
+    c_all = c_all[sort_array]
+
     if color_range is not None:
         cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all, s=markersize,
-                         edgecolors='none', cmap=plt.cm.viridis, vmin=color_range[0], vmax=color_range[1])
+                         edgecolors='none', cmap=cmap, vmin=color_range[0], vmax=color_range[1])
     else:
         cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all/c_all.max()*1000, s=markersize,
-                         edgecolors='none', cmap=plt.cm.viridis, vmax=colormap_cutoff*1000)
+                         edgecolors='none', cmap=cmap, vmax=colormap_cutoff*1000)
     nice_spines(ax, grid=False)
     ax.autoscale(tight=1)
     ax.set_aspect('equal')
