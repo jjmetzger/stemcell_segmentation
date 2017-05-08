@@ -159,7 +159,7 @@ class Ws3d(object):
         else:
             self.grid_plot(self.probability_map, z, contrast_stretch, figsize)
 
-    def grid_plot(self, image_to_plot, z=None, contrast_stretch=False, figsize=None, cmap=None):
+    def grid_plot(self, z=None, contrast_stretch=False, figsize=None, cmap=None):
         """
         Plot all z-slices
 
@@ -171,14 +171,7 @@ class Ws3d(object):
         :return:
         """
 
-        # try:
-        #     assert image_to_plot.ndim == 3
-        # except AssertionError:
-        #     print('Error: image to plot must be a z-stack, i.e. must have dimension .ndim == 3')
-        #     return
-        # except AttributeError:
-        #     print('Error: image to plot is not in the correct format - needs to be a numpy array.')
-        #     return
+        image_to_plot = self.image_stack
 
         if z is not None and image_to_plot.ndim == 2:
             print("Warning: Gave z-information but only have 2d image")
@@ -220,6 +213,12 @@ class Ws3d(object):
                     else:
                         ax = axes[i, j].imshow(image_to_plot[n], interpolation='None', cmap=cmap)
                         ax.set_clim(0, image_to_plot.max())
+
+                    # show seeds of watershed. TODO: Do it on the dataframe since may have deleted cells
+                    seeds_in_current_z = self.peaks[self.peaks[:, 0] == n][:,1:] # find seeds that are in the current z
+                    axes[i, j].plot(seeds_in_current_z[:, 0], seeds_in_current_z[:, 1], 'xr')
+                    axes[i, j].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
+                    axes[i, j].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
                 # Remove empty plots
                 for ax in axes.ravel():
@@ -547,6 +546,17 @@ class Ws3d(object):
             ax[1].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr')
             ax[1].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
             ax[1].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
+
+    def write_image_with_seeds(self, filename=None):
+        to_write = self.image_stack.copy()
+        # to_write[self.peaks[:, 0], self.peaks[:, 1], self.peaks[:, 2]] = np.iinfo(self.image_stack.dtype).max
+
+        to_write[self.peaks[:, 0], self.peaks[:, 1], self.peaks[:, 2]] = np.iinfo(self.image_stack.dtype).max
+
+        if filename is None:
+            filename = 'image_with_seeds.tif'
+        io.imsave(filename, to_write)
+
 
     def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=True, z=None, seed=130):
         """
@@ -1331,6 +1341,82 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
     else:
         cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all/c_all.max()*1000, s=markersize,
                          edgecolors='none', cmap=cmap, vmax=colormap_cutoff*1000)
+    nice_spines(ax, grid=False)
+    ax.autoscale(tight=1)
+    ax.set_aspect('equal')
+    if not axis:
+        ax.axis('off')
+    if colorbar:
+        fig.colorbar(cax)
+
+    if filename is not None:
+        fig.savefig(filename)
+
+
+def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis):
+    """
+    Dot-plot as in Warmflash et al.
+
+    :param w_list: watershed object or list of objects
+    :param channel_id:
+    :param color_range: color range, overrides colormap_cutoff
+    :param colormap_cutoff: percentage of maximum for cutoff. Makes smaller differences more visible.
+    :param only_selected_cells:
+    :param markersize:
+    :param colorbar: whether to plot a colorbar
+    :param r_limit: only plot cells smaller than this radius (in um)
+    :param axis: plot axes or not
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    x_all = np.zeros((0,))
+    y_all = np.zeros((0,))
+    z_all = np.zeros((0,))
+    c_all = np.zeros((0,))
+
+    for w in w_list:
+
+        if w.image_dim == 3:
+            indices = (1, 2, 0)
+        else:
+            indices = (0, 1)
+
+        index = w._get_indices(only_selected_cells)
+        x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[indices[0]]
+        y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[indices[1]]
+        print(np.vstack(w.df.centroid[index].values.flat).shape)
+        z = np.vstack(w.df.centroid[index].values.flat)[:, indices[2]]
+        c = w.df[channel_id][index].values
+
+        if r_limit is not None:
+            index_smaller_than_r = (x**2 + y**2)<r_limit**2
+            x = x[index_smaller_than_r]
+            y = y[index_smaller_than_r]
+            c = c[index_smaller_than_r]
+            z = z[index_smaller_than_r]
+
+        x_all = np.hstack((x_all, x))
+        y_all = np.hstack((y_all, y))
+        c_all = np.hstack((c_all, c))
+        z_all = np.hstack((z_all, z))
+
+    fig, ax = plt.subplots()
+
+    # sort according to intensity for displaying the high intensity dots on top of the low ones, which just look better
+    sort_array = c_all.argsort()
+    x_all = x_all[sort_array]
+    y_all = y_all[sort_array]
+    c_all = c_all[sort_array]
+    z_all = z_all[sort_array]
+
+    if color_range is not None:
+        cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all, c=c_all, s=markersize,
+                         edgecolors='none', cmap=cmap, vmin=color_range[0], vmax=color_range[1])
+    else:
+        cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all, c=c_all/c_all.max()*1000, s=markersize,
+                         edgecolors='none', cmap=cmap, vmax=colormap_cutoff*1000)
+
     nice_spines(ax, grid=False)
     ax.autoscale(tight=1)
     ax.set_aspect('equal')
