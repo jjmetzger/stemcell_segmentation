@@ -407,7 +407,8 @@ class Ws3d(object):
 
             # check for version because compactness is only available in watershed > 0.12
             if LooseVersion(skimage.__version__) > LooseVersion('0.13'):
-                self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask, compactness=compactness)
+                self.ws = skimage.morphology.watershed(pm, markers, mask=self.mask, compactness=compactness)
+                print('using compactness')
             else:
                 self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
 
@@ -549,10 +550,14 @@ class Ws3d(object):
 
     def write_image_with_seeds(self, filename=None):
         to_write = self.image_stack.copy()
-        # to_write[self.peaks[:, 0], self.peaks[:, 1], self.peaks[:, 2]] = np.iinfo(self.image_stack.dtype).max
+
+        # a = np.zeros((*w.image_stack.shape, 3), dtype=w.image_stack.dtype)
+        # a[:, :, :, 0] = w.image_stack
+        # a[:, :, :, 1] = w.image_stack
+        # a[:, :, :, 2] = w.image_stack
+        # a[w.peak_array, 0] = np.iinfo(w.image_stack.dtype).max
 
         to_write[self.peaks[:, 0], self.peaks[:, 1], self.peaks[:, 2]] = np.iinfo(self.image_stack.dtype).max
-
         if filename is None:
             filename = 'image_with_seeds.tif'
         io.imsave(filename, to_write)
@@ -1429,13 +1434,14 @@ def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, o
         fig.savefig(filename)
 
 
-def coexpression_per_cell(w_list, channel_id1, channel_id2, only_selected_cells=False, fontsize=16):
+def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only_selected_cells=False, fontsize=16):
     """
     Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
 
     :param w_list: watershed object or list of objects
     :param channel_id1:
     :param channel_id2:
+    :param normalize:
     :param only_selected_cells:
     :param fontsize: fontsize for plotting
     :return:
@@ -1452,8 +1458,18 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, only_selected_cells=
         ch1_all = np.hstack((ch1_all, ch1))
         ch2_all = np.hstack((ch2_all, ch2))
 
+    #normalize
+    if normalize:
+        # factor of 1.01 such that highest is not exactly one. Since this is arbitrary scaling of arbitrary
+        # intensity values, can chose that
+        ch1_all /= 1.01*ch1_all.max()
+        ch2_all /= 1.01*ch2_all.max()
+        print('norm')
+        print(ch1_all.max(), ch2_all.max())
+
     fig, ax = plt.subplots()
-    ax.scatter(ch1, ch2, edgecolors='none', c='k', alpha=0.8)
+    ax.scatter(ch1_all, ch2_all, edgecolors='none', c='k', alpha=0.8)
+    # ax.plot(ch2_all)
     nice_spines(ax)
     ax.set_xlabel(channel_id1, fontsize=fontsize)
     ax.set_ylabel(channel_id2, fontsize=fontsize)
