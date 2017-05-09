@@ -410,7 +410,7 @@ class Ws3d(object):
                 self.ws = skimage.morphology.watershed(pm, markers, mask=self.mask, compactness=compactness)
                 print('using compactness')
             else:
-                self.ws = skimage.morphology.watershed(-self.image_stack, markers, mask=self.mask)
+                self.ws = skimage.morphology.watershed(pm, markers, mask=self.mask)
 
             if remove_small_nuclei:
                 self.ws = remove_small_objects(self.ws, min_size=opensize_small_objects)
