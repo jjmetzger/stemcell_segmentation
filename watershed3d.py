@@ -452,7 +452,7 @@ class Ws3d(object):
             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
     @staticmethod
-    def _regionprops_to_dataframe(ws, image_stack, cyto=None):
+    def _regionprops_to_dataframe(ws, image_stack, cyto=None, average_method=np.median):
         """
         Return pd.DataFrame with relevant entries from watershed image. Keep static so can use it for other images as
         well.
@@ -463,11 +463,16 @@ class Ws3d(object):
         :return: pd.DataFrame with entries ('area', 'total_intensity', 'mean_intensity', 'centroid') and index 'cell_id'
         """
 
+        if not (np.median == np.array([np.max, np.median, np.sum])).any():
+            raise TypeError('average_method must be one of np.max, np.median or np.sum')
+
         rp = skimage.measure.regionprops(ws, intensity_image=image_stack)
 
         if cyto is None:
             columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
-            rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+
             indices = [i1.label for i1 in rp]
             indices = pd.Index(indices, name='cell_id')
             # print('len rp=', len(rp))
@@ -548,18 +553,25 @@ class Ws3d(object):
             ax[1].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
             ax[1].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
 
-    def write_image_with_seeds(self, filename=None):
+    def write_image_with_seeds(self, filename='image_with_seeds.tif'):
+        """
+        Write an image to tif file readable by ImageJ, with the seeds as bright white dots.
+        :param filename: filename to write to
+        :return: None
+        """
+
         to_write = self.image_stack.copy()
 
+        # below would be RGB
         # a = np.zeros((*w.image_stack.shape, 3), dtype=w.image_stack.dtype)
         # a[:, :, :, 0] = w.image_stack
         # a[:, :, :, 1] = w.image_stack
         # a[:, :, :, 2] = w.image_stack
         # a[w.peak_array, 0] = np.iinfo(w.image_stack.dtype).max
 
-        to_write[self.peaks[:, 0], self.peaks[:, 1], self.peaks[:, 2]] = np.iinfo(self.image_stack.dtype).max
-        if filename is None:
-            filename = 'image_with_seeds.tif'
+        # to_write[self.peaks[:, 0], self.peaks[:, 1], self.peaks[:, 2]] = np.iinfo(self.image_stack.dtype).max
+        dilated_peak_array = binary_dilation(self.peak_array, selem=ball(3))
+        to_write[dilated_peak_array] = np.iinfo(self.image_stack.dtype).max
         io.imsave(filename, to_write)
 
 
@@ -640,7 +652,7 @@ class Ws3d(object):
                 ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower')
             ax.set_title('after selection of good nuclei')
 
-    def apply_to_channels(self, filename, channel_id, remove_background=True):
+    def apply_to_channels(self, filename, channel_id, remove_background=True, average_method=np.median):
         """
         Apply nuclear marker to other channels.
 
@@ -661,15 +673,17 @@ class Ws3d(object):
             raise RuntimeError('image shapes are not the same, original is ' + str(self.ws.shape) + ' and to be '
                                 'superimpose is ' + str(im.shape))
         # self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)
-        channel_df = self._regionprops_to_dataframe(self.ws, im)
+        channel_df = self._regionprops_to_dataframe(self.ws, im, average_method=average_method)
+        # channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid']
         channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid']
 
+        # remove channel if it exists. This happens when reapplying an image to an updated segmentation.
         try:
             self.df.drop(channel_id, axis=1, inplace=1)
         except ValueError:  # does not exist
             pass
 
-        self.df = pd.concat([self.df, channel_df[channel_id]], axis=1)
+        self.df = pd.concat([self.df, channel_df[channel_id]], axis=1) # only take the channeld_id channel, i.e. total intensity
         self.channels_image[channel_id] = im
 
     def find_center_of_colony(self):
@@ -1360,7 +1374,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
 
 def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis):
     """
-    Dot-plot as in Warmflash et al.
+    Dot-plot, but radial and z-resolved.
 
     :param w_list: watershed object or list of objects
     :param channel_id:
@@ -1434,7 +1448,7 @@ def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, o
         fig.savefig(filename)
 
 
-def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only_selected_cells=False, fontsize=16):
+def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only_selected_cells=False, fontsize=20, filename=None):
     """
     Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
 
@@ -1464,16 +1478,27 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only
         # intensity values, can chose that
         ch1_all /= 1.01*ch1_all.max()
         ch2_all /= 1.01*ch2_all.max()
-        print('norm')
-        print(ch1_all.max(), ch2_all.max())
+        # print(ch1_all.max(), ch2_all.max())
 
+    almost_black = '#262626'
     fig, ax = plt.subplots()
-    ax.scatter(ch1_all, ch2_all, edgecolors='none', c='k', alpha=0.8)
+    ax.scatter(ch1_all, ch2_all, edgecolors='none', c=almost_black, alpha=0.8)
     # ax.plot(ch2_all)
-    nice_spines(ax)
+    nice_spines(ax, grid=False)
     ax.set_xlabel(channel_id1, fontsize=fontsize)
     ax.set_ylabel(channel_id2, fontsize=fontsize)
     ax.autoscale(tight=1)
+    ax.tick_params(axis='both', which='major', labelsize=16)
+    ax.tick_params(axis='both', which='minor', labelsize=10)
+
+    if normalize:
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 1])
+
+    if filename is not None:
+        fig.savefig(filename)
+
+    return ch1_all, ch2_all
 
 
 def coexpression_per_pixel(w_list, channel_id1, channel_id2, downsample=1, only_selected_cells=False, fontsize=16,
