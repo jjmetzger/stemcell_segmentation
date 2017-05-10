@@ -652,7 +652,7 @@ class Ws3d(object):
                 ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower')
             ax.set_title('after selection of good nuclei')
 
-    def apply_to_channels(self, filename, channel_id, remove_background=True, average_method=np.median):
+    def apply_to_channels(self, filename, channel_id, remove_background=False, average_method=np.median):
         """
         Apply nuclear marker to other channels.
 
