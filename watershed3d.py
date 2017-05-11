@@ -1375,7 +1375,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         fig.savefig(filename)
 
 
-def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis):
+def dot_plot_radial(w_list, channel_id, z_scale=None, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis):
     """
     Dot-plot, but radial and z-resolved.
 
@@ -1432,6 +1432,8 @@ def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, o
     c_all = c_all[sort_array]
     z_all = z_all[sort_array]
 
+    if z_all is not None:
+        z_all *= z_scale
     if color_range is not None:
         cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all, c=c_all, s=markersize,
                          edgecolors='none', cmap=cmap, vmin=color_range[0], vmax=color_range[1])
@@ -1442,6 +1444,8 @@ def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, o
     nice_spines(ax, grid=False)
     ax.autoscale(tight=1)
     ax.set_aspect('equal')
+    ax.set_xlabel('radius ($\mu$m)')
+    ax.set_ylabel('z ($\mu$m)')
     if not axis:
         ax.axis('off')
     if colorbar:
