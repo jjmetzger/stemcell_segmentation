@@ -63,7 +63,8 @@ class Ws3d(object):
             raise RuntimeError("Image is neither 2 or 3 dimensional")
 
         self.xy_scale = xy_scale
-
+        self.center_of_mass = None
+        self.radius_of_gyration = None
         self.peaks = None
         self.peak_array = None
         self.probability_map = None
@@ -450,6 +451,8 @@ class Ws3d(object):
             # indices = pd.Index(indices, name='cell_id')
             # self.df = pd.DataFrame(rpd, index=indices, columns=columns)
             self.df = self._regionprops_to_dataframe(self.ws, self.image_stack, self.labels_cyto)
+            self.center_of_mass = np.vstack(self.df.centroid).mean(axis=0)
+            self.radius_of_gyration = np.sqrt(np.sum((np.vstack(self.df.centroid) - self.center_of_mass)**2, axis=1)).mean()
 
             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
@@ -693,11 +696,11 @@ class Ws3d(object):
         find center of mass
         """
 
-        #self.center = np.array(center_of_mass(np.abs(self.image_stack)))
+        self.center = np.array(center_of_mass(np.abs(self.image_stack)))
         # take middle of stack        
-        middle = int(np.round(self.image_stack.shape[0] /2))
-        center_xy = np.array(center_of_mass(np.abs(self.image_stack[middle])))
-        self.center = np.array([0., center_xy[0], center_xy[1]])
+#         middle = int(np.round(self.image_stack.shape[0] /2))
+#         center_xy = np.array(center_of_mass(np.abs(self.image_stack[middle])))
+#         self.center = np.array([0., center_xy[0], center_xy[1]])
         
         
 
