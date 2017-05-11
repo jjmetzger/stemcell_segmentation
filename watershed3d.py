@@ -19,6 +19,7 @@ from scipy.ndimage.measurements import center_of_mass  # note this gives center 
 from distutils.version import LooseVersion
 from matplotlib.colors import LogNorm
 from skimage.filters import threshold_otsu
+from ipywidgets import interact
 
 io.use_plugin('tifffile')
 # sys.path.append('/Users/jakob/Documents/RU/Code/segment')
@@ -158,6 +159,7 @@ class Ws3d(object):
                 self.grid_plot(self.mask, z, contrast_stretch, figsize)
         else:
             self.grid_plot(self.probability_map, z, contrast_stretch, figsize)
+
 
     def grid_plot(self, z=None, contrast_stretch=False, figsize=None, cmap=None):
         """
@@ -408,7 +410,7 @@ class Ws3d(object):
             # check for version because compactness is only available in watershed > 0.12
             if LooseVersion(skimage.__version__) > LooseVersion('0.13'):
                 self.ws = skimage.morphology.watershed(pm, markers, mask=self.mask, compactness=compactness)
-                print('using compactness')
+                # print('using compactness')
             else:
                 self.ws = skimage.morphology.watershed(pm, markers, mask=self.mask)
 
@@ -973,6 +975,7 @@ class Ws3d(object):
         random_array2 = np.zeros((n, 4))
         random_array2[:, :3] = random_array
         random_array2[:, 3] = .8
+        # random_array2[0, 3] = 1. # keep 0 white
 
         if return_darker:
             return mpl.colors.ListedColormap(random_array), mpl.colors.ListedColormap(random_array2)
@@ -1847,3 +1850,45 @@ def running_mean(x, N):
     # http://stackoverflow.com/questions/13728392/moving-average-or-running-mean
     cumsum = np.cumsum(np.insert(x, 0, 0))
     return (cumsum[N:] - cumsum[:-N]) / N
+
+
+def browse_stack(w):
+
+    n = len(w.ws)
+    # self._contrast_stretch
+
+    def view_image(i):
+        plt.imshow(w.ws[i], cmap=random_cmap(seed=123), alpha=0.7)
+
+        seeds_in_current_z = w.peaks[w.peaks[:, 0] == i][:, 1:]  # find seeds that are in the current z
+        plt.plot(seeds_in_current_z[:, 1], seeds_in_current_z[:, 0], 'xr')
+        plt.xlim(w.peaks[:, 2].min() - 20, w.peaks[:, 2].max() + 20)
+        plt.ylim(w.peaks[:, 1].min() - 20, w.peaks[:, 1].max() + 20)
+        plt.axis('off')
+        plt.show()
+
+    interact(view_image, i=(0, n - 1))
+
+
+def random_cmap(seed=None, return_darker=False, n=1024):
+
+    """
+    make random colormap, good for plotting segmentation
+
+    :param seed: seed for random colormap
+    :param return_darker: also return a darker version
+    :param n: number of colors
+    :return: colormap(s)
+    """
+    np.random.seed(seed)
+    random_array = np.random.rand(n, 3)
+    random_array[0, :] = 1.
+    random_array2 = np.zeros((n, 4))
+    random_array2[:, :3] = random_array
+    random_array2[:, 3] = .8
+    # random_array2[0, 3] = 1. # keep 0 white
+
+    if return_darker:
+        return mpl.colors.ListedColormap(random_array), mpl.colors.ListedColormap(random_array2)
+    else:
+        return mpl.colors.ListedColormap(random_array)
