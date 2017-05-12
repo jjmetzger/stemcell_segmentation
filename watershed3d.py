@@ -31,15 +31,16 @@ class Ws3d(object):
     object classifier from Ilastik, uses this for seeding. Otherwise tries to guess blobs for seeding.
     """
 
-    def __init__(self, imagefile, xy_scale=1.0, z_scale=1.5, z=None):
+    def __init__(self, imagefile, xy_scale=1.0, z_scale=1.0, z=None):
         """
         Initializes Ws3d with an imagefile. Can set the relative x,y and z scales of the z-stack, which is important
         for the blob
         detection.
 
         :param imagefile: File to segment
-        :param xy_scale: scale in micrometer of the x and y pixels. E.g. 1000um and 800 pixels this should be 800/1000
-        :param z_scale: same as above for z
+        :param xy_scale: scale in micrometer of the x and y pixels in microns/pixel, e.g. have 800 pixels for 1000um this should be 800/1000
+        :param z_scale: scale in micrometer of z pixels in microns/pixel
+
         """
 
         self.z = z
@@ -450,14 +451,14 @@ class Ws3d(object):
             # indices = [i1.label for i1 in rp]
             # indices = pd.Index(indices, name='cell_id')
             # self.df = pd.DataFrame(rpd, index=indices, columns=columns)
-            self.df = self._regionprops_to_dataframe(self.ws, self.image_stack, self.labels_cyto)
-            self.center_of_mass = np.vstack(self.df.centroid).mean(axis=0)
-            self.radius_of_gyration = np.sqrt(np.sum((np.vstack(self.df.centroid) - self.center_of_mass)**2, axis=1)).mean()
+            self.df = self._regionprops_to_dataframe(self.ws, self.image_stack, self.labels_cyto, xyscale=self.xy_scale, zscale=self.z_scale)
+            self.center_of_mass = np.vstack(self.df.centroid_rescaled).mean(axis=0)
+            self.radius_of_gyration = np.sqrt(np.sum((np.vstack(self.df.centroid_rescaled) - self.center_of_mass)**2, axis=1).mean())
 
             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
     @staticmethod
-    def _regionprops_to_dataframe(ws, image_stack, cyto=None, average_method=np.median):
+    def _regionprops_to_dataframe(ws, image_stack, cyto=None, average_method=np.median, xyscale=1., zscale=1.):
         """
         Return pd.DataFrame with relevant entries from watershed image. Keep static so can use it for other images as
         well.
@@ -474,9 +475,9 @@ class Ws3d(object):
         rp = skimage.measure.regionprops(ws, intensity_image=image_stack)
 
         if cyto is None:
-            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid')
+            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled')
             # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale])] for i1 in rp]
 
             indices = [i1.label for i1 in rp]
             indices = pd.Index(indices, name='cell_id')
@@ -678,9 +679,9 @@ class Ws3d(object):
             raise RuntimeError('image shapes are not the same, original is ' + str(self.ws.shape) + ' and to be '
                                 'superimpose is ' + str(im.shape))
         # self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)
-        channel_df = self._regionprops_to_dataframe(self.ws, im, average_method=average_method)
+        channel_df = self._regionprops_to_dataframe(self.ws, im, average_method=average_method, xyscale=self.xy_scale, zscale=self.z_scale)
         # channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid']
-        channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid']
+        channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid', 'centroid_rescaled']
 
         # remove channel if it exists. This happens when reapplying an image to an updated segmentation.
         try:
@@ -1436,7 +1437,7 @@ def dot_plot_radial(w_list, channel_id, z_scale=None, color_range=None, colormap
     z_all = z_all[sort_array]
 
     if z_all is not None:
-        z_all *= z_scale
+        z_all /= w.z_scale
     if color_range is not None:
         cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all, c=c_all, s=markersize,
                          edgecolors='none', cmap=cmap, vmin=color_range[0], vmax=color_range[1])
