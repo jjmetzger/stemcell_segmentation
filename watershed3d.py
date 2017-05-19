@@ -693,7 +693,7 @@ class Ws3d(object):
         # self.channels[channel_id] = self._regionprops_to_dataframe(self.ws, im)
         channel_df = self._regionprops_to_dataframe(self.ws, im, average_method=average_method, xyscale=self.xy_scale, zscale=self.z_scale)
         # channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid']
-        channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid', 'centroid_rescaled']
+        channel_df.columns = ['area', channel_id, 'mean_intensity', 'centroid', 'centroid_rescaled', 'label']
 
         # remove channel if it exists. This happens when reapplying an image to an updated segmentation.
         try:
