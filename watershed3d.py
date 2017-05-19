@@ -464,8 +464,9 @@ class Ws3d(object):
             # indices = pd.Index(indices, name='cell_id')
             # self.df = pd.DataFrame(rpd, index=indices, columns=columns)
             self.df = self._regionprops_to_dataframe(self.ws, self.image_stack, self.labels_cyto, xyscale=self.xy_scale, zscale=self.z_scale)
-            self.center_of_mass = np.vstack(self.df.centroid_rescaled).mean(axis=0)
-            self.radius_of_gyration = np.sqrt(np.sum((np.vstack(self.df.centroid_rescaled) - self.center_of_mass)**2, axis=1).mean())
+            # self.center_of_mass = np.vstack(self.df.centroid_rescaled).mean(axis=0)
+            # self.radius_of_gyration = radius_of_gyration()
+            self.center_of_mass, self.radius_of_gyration = radius_of_gyration(self.df.centroids_rescaled)
 
             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
@@ -1952,3 +1953,16 @@ def relabel_peaks(a):
                     a[i1,i2,i3] += to_add
                     to_add += 1
     return a
+
+
+def radius_of_gyration(centroid_rescaled):
+    """
+
+    :param centroid_rescaled:
+    :return: center of mass, radius of gyration
+    """
+
+    center_of_mass = np.vstack(centroid_rescaled).mean(axis=0)
+    rog = np.sqrt(np.sum((np.vstack(centroid_rescaled) - center_of_mass) ** 2, axis=1).mean())
+
+    return center_of_mass, rog
