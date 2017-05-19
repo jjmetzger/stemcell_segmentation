@@ -20,6 +20,8 @@ from distutils.version import LooseVersion
 from matplotlib.colors import LogNorm
 from skimage.filters import threshold_otsu
 from ipywidgets import interact
+from numba import jit
+
 # import seaborn as sns
 
 io.use_plugin('tifffile')
@@ -414,6 +416,8 @@ class Ws3d(object):
             else:
                 self.peak_array = peak_local_max(pm, min_distance=min_distance, indices=False)
 
+            self.peak_array = relabel_peaks(self.peak_array)
+
             self.peaks = np.transpose(np.nonzero(self.peak_array))  # same as above with indices True, but need that too
             markers = ndi.label(self.peak_array)[0]
 
@@ -483,9 +487,9 @@ class Ws3d(object):
         rp = skimage.measure.regionprops(ws, intensity_image=image_stack)
 
         if cyto is None:
-            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled')
+            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled', 'label')
             # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale])] for i1 in rp]
+            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
 
             indices = [i1.label for i1 in rp]
             indices = pd.Index(indices, name='cell_id')
@@ -1894,7 +1898,7 @@ def browse_stack(w):
 
     n = len(w.ws)
     # self._contrast_stretch
-
+    # plt.figu
     def view_image(i):
         plt.imshow(w.ws[i], cmap=random_cmap(seed=123), alpha=0.7)
 
@@ -1936,3 +1940,15 @@ def random_cmap(seed=None, return_darker=False, n=1024):
         return mpl.colors.ListedColormap(random_array), mpl.colors.ListedColormap(random_array2)
     else:
         return mpl.colors.ListedColormap(random_array)
+
+
+@jit
+def relabel_peaks(a):
+    to_add = 1
+    for i1 in range(a.shape[0]):
+        for i2 in range(a.shape[1]):
+            for i3 in range(a.shape[2]):
+                if a[i1,i2,i3] == 1:
+                    a[i1,i2,i3] += to_add
+                    to_add += 1
+    return a
