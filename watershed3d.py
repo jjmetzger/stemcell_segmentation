@@ -209,6 +209,7 @@ class Ws3d(object):
                 ncols = np.int(self.z_size // nrows + 1)
 
                 fig, axes = plt.subplots(nrows, ncols, figsize=(3 * ncols, 3 * nrows))
+                peak_counter = 1
                 for n in range(self.z_size):
                     i = n // ncols
                     j = n % ncols
@@ -222,6 +223,12 @@ class Ws3d(object):
                     # show seeds of watershed. TODO: Do it on the dataframe since may have deleted cells
                     seeds_in_current_z = self.peaks[self.peaks[:, 0] == n][:,1:] # find seeds that are in the current z
                     axes[i, j].plot(seeds_in_current_z[:, 1], seeds_in_current_z[:, 0], 'xr')
+
+                    # label seeds
+                    for ipeaks in range(seeds_in_current_z.shape[0]):
+                        axes[i, j].text(seeds_in_current_z[ipeaks, 1], seeds_in_current_z[ipeaks, 0], str(peak_counter))
+                        peak_counter += 1
+
                     axes[i, j].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
                     axes[i, j].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
