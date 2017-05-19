@@ -20,6 +20,7 @@ from distutils.version import LooseVersion
 from matplotlib.colors import LogNorm
 from skimage.filters import threshold_otsu
 from ipywidgets import interact
+import seaborn as sns
 
 io.use_plugin('tifffile')
 # sys.path.append('/Users/jakob/Documents/RU/Code/segment')
@@ -1379,7 +1380,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         fig.savefig(filename)
 
 
-def dot_plot_radial(w_list, channel_id, z_scale=None, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis):
+def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis, dark_background=False):
     """
     Dot-plot, but radial and z-resolved.
 
@@ -1392,7 +1393,9 @@ def dot_plot_radial(w_list, channel_id, z_scale=None, color_range=None, colormap
     :param colorbar: whether to plot a colorbar
     :param r_limit: only plot cells smaller than this radius (in um)
     :param axis: plot axes or not
+    :param dark_background: whether to plot on a dark background
     :return:
+
     """
 
     w_list = make_iterable(w_list)
@@ -1436,16 +1439,17 @@ def dot_plot_radial(w_list, channel_id, z_scale=None, color_range=None, colormap
     c_all = c_all[sort_array]
     z_all = z_all[sort_array]
 
-    if z_all is not None:
-        z_all /= w.z_scale
+
+    # if z_all is not None:
+    #     z_all /= w.z_scale
     if color_range is not None:
-        cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all, c=c_all, s=markersize,
+        cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all/w.z_scale, c=c_all, s=markersize,
                          edgecolors='none', cmap=cmap, vmin=color_range[0], vmax=color_range[1])
     else:
-        cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all, c=c_all/c_all.max()*1000, s=markersize,
+        cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all/w.z_scale, c=c_all/c_all.max()*1000, s=markersize,
                          edgecolors='none', cmap=cmap, vmax=colormap_cutoff*1000)
 
-    nice_spines(ax, grid=False)
+    nice_spines(ax, grid=False, dark=dark_background)
     ax.autoscale(tight=1)
     ax.set_aspect('equal')
     ax.set_xlabel('radius ($\mu$m)')
@@ -1459,7 +1463,7 @@ def dot_plot_radial(w_list, channel_id, z_scale=None, color_range=None, colormap
         fig.savefig(filename)
 
 
-def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only_selected_cells=False, fontsize=20, filename=None):
+def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only_selected_cells=False, fontsize=20, filename=None, fit=False):
     """
     Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
 
@@ -1491,23 +1495,36 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only
         ch2_all /= 1.01*ch2_all.max()
         # print(ch1_all.max(), ch2_all.max())
 
-    almost_black = '#262626'
-    fig, ax = plt.subplots()
-    ax.scatter(ch1_all, ch2_all, edgecolors='none', c=almost_black, alpha=0.8)
-    # ax.plot(ch2_all)
-    nice_spines(ax, grid=False)
-    ax.set_xlabel(channel_id1, fontsize=fontsize)
-    ax.set_ylabel(channel_id2, fontsize=fontsize)
-    ax.autoscale(tight=1)
-    ax.tick_params(axis='both', which='major', labelsize=16)
-    ax.tick_params(axis='both', which='minor', labelsize=10)
 
+    almost_black = '#262626'
+    fig, ax = plt.subplots(figsize=(4,4))
+    dd = pd.DataFrame(data=np.vstack((ch1_all, ch2_all)).T, columns=(channel_id1, channel_id2))
+    if fit:
+        # ax.plot(np.unique(ch1_all), np.poly1d(np.polyfit(ch1_all, ch1_all, 1))(np.unique(ch1_all)), '--k', lw=0.5)
+        # ax.scatter(ch1_all, ch2_all, edgecolors='none', alpha=0.8, color=almost_black)
+        # sns.lmplot(x=channel_id1, y=channel_id2, data=dd, palette='Set1')
+        sns.regplot(x=channel_id1, y=channel_id2, data=dd, ax=ax, color='paleturquoise')
+        # print(ch1_all.shape, ch2_all.shape`)
+    else:
+        # ax.scatter(ch1_all, ch2_all)
+        sns.regplot(x=channel_id1, y=channel_id2, data=dd, ax=ax, fit_reg=False)
+        # sns.lmplot(x=channel_id1, y=channel_id2, data=dd, palette='Set1')
+
+    # nice_spines(ax, grid=False)
+    # ax.set_xlabel(channel_id1, fontsize=fontsize)
+    # ax.set_ylabel(channel_id2, fontsize=fontsize)
+    # ax.autoscale(tight=1)
+    # ax.tick_params(axis='both', which='major', labelsize=16)
+    # ax.tick_params(axis='both', which='minor', labelsize=10)
+    #
     if normalize:
         ax.set_xlim([0, 1])
         ax.set_ylim([0, 1])
 
+    sns.despine()
+    fig.tight_layout()
     if filename is not None:
-        fig.savefig(filename)
+        plt.savefig(filename)
 
     return ch1_all, ch2_all
 
@@ -1833,8 +1850,11 @@ def make_iterable(a):
         return [a]
 
 
-def nice_spines(ax, grid=True):
-    ax.grid(grid)
+def nice_spines(ax, grid=True, dark=False):
+
+    if grid:
+        ax.grid(grid)
+
     gridlines = ax.get_xgridlines() + ax.get_ygridlines()
     for line in gridlines:
         line.set_linestyle('-')
@@ -1852,7 +1872,10 @@ def nice_spines(ax, grid=True):
     ax.yaxis.set_ticks_position('left')
     for spine in spines_to_keep:
         ax.spines[spine].set_linewidth(0.5)
-        ax.spines[spine].set_color(almost_black)
+        if not dark:
+            ax.spines[spine].set_color(almost_black)
+        else:
+            ax.spines[spine].set_color('#ffffff')
 
 def running_mean(x, N):
     # http://stackoverflow.com/questions/13728392/moving-average-or-running-mean
