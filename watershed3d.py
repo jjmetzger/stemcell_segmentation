@@ -67,8 +67,8 @@ class Ws3d(object):
             raise RuntimeError("Image is neither 2 or 3 dimensional")
 
         self.xy_scale = xy_scale
-        self.center_of_mass = None
-        self.radius_of_gyration = None
+        # self.center_of_mass = None
+        # self.radius_of_gyration = None
         self.peaks = None
         self.peak_array = None
         self.probability_map = None
@@ -466,7 +466,7 @@ class Ws3d(object):
             self.df = self._regionprops_to_dataframe(self.ws, self.image_stack, self.labels_cyto, xyscale=self.xy_scale, zscale=self.z_scale)
             # self.center_of_mass = np.vstack(self.df.centroid_rescaled).mean(axis=0)
             # self.radius_of_gyration = radius_of_gyration()
-            self.center_of_mass, self.radius_of_gyration = radius_of_gyration(self.df.centroids_rescaled)
+            # self.center_of_mass, self.radius_of_gyration = radius_of_gyration(self.df.centroids_rescaled)
 
             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
