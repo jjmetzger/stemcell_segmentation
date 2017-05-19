@@ -20,7 +20,7 @@ from distutils.version import LooseVersion
 from matplotlib.colors import LogNorm
 from skimage.filters import threshold_otsu
 from ipywidgets import interact
-import seaborn as sns
+# import seaborn as sns
 
 io.use_plugin('tifffile')
 # sys.path.append('/Users/jakob/Documents/RU/Code/segment')
@@ -226,7 +226,7 @@ class Ws3d(object):
 
                     # label seeds
                     for ipeaks in range(seeds_in_current_z.shape[0]):
-                        axes[i, j].text(seeds_in_current_z[ipeaks, 1], seeds_in_current_z[ipeaks, 0], str(peak_counter))
+                        axes[i, j].text(seeds_in_current_z[ipeaks, 1], seeds_in_current_z[ipeaks, 0], str(peak_counter), color='r', fontsize=22)
                         peak_counter += 1
 
                     axes[i, j].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
@@ -1898,7 +1898,13 @@ def browse_stack(w):
     def view_image(i):
         plt.imshow(w.ws[i], cmap=random_cmap(seed=123), alpha=0.7)
 
+        peak_counter = 1
         seeds_in_current_z = w.peaks[w.peaks[:, 0] == i][:, 1:]  # find seeds that are in the current z
+
+        for ipeaks in range(seeds_in_current_z.shape[0]):
+            plt.text(seeds_in_current_z[ipeaks, 1], seeds_in_current_z[ipeaks, 0], str(peak_counter), color='r', fontsize=22)
+            peak_counter += 1
+
         plt.plot(seeds_in_current_z[:, 1], seeds_in_current_z[:, 0], 'xr')
         plt.xlim(w.peaks[:, 2].min() - 20, w.peaks[:, 2].max() + 20)
         plt.ylim(w.peaks[:, 1].min() - 20, w.peaks[:, 1].max() + 20)
