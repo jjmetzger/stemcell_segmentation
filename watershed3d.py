@@ -1996,7 +1996,18 @@ def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=
         X, Y, Z, U, V, W = zip(soa)
         ax.quiver(X, Y, Z, U, V, W, pivot='tail', length=vlength, arrow_length_ratio=0.3 / vlength)
 
-    ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
+    # ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
+    xrange = pts[1,:].max() - pts[1,:].min()
+    yrange = pts[2,:].max() - pts[2,:].min()
+    zrange = pts[0,:].max() - pts[0,:].min()
+    maxrange = max(xrange, yrange, zrange)
+    xrange = [pts[1, :].mean() - maxrange/2, pts[1, :].mean() + maxrange/2]
+    yrange = [pts[2, :].mean() - maxrange/2, pts[2, :].mean() + maxrange/2]
+    zrange = [pts[0, :].mean() - maxrange/2, pts[0, :].mean() + maxrange/2]
+
+    ax.auto_scale_xyz(xrange, yrange, zrange)
+    # ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
+
 
     if filename is not None:
         fig.savefig(filename)
