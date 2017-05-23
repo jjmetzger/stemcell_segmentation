@@ -21,6 +21,8 @@ from matplotlib.colors import LogNorm
 from skimage.filters import threshold_otsu
 from ipywidgets import interact
 from numba import jit
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 # import seaborn as sns
 
@@ -1392,7 +1394,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         fig.savefig(filename)
 
 
-def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis, dark_background=False):
+def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis, dark_background=False, ec='none'):
     """
     Dot-plot, but radial and z-resolved.
 
@@ -1456,10 +1458,10 @@ def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, o
     #     z_all /= w.z_scale
     if color_range is not None:
         cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all/w.z_scale, c=c_all, s=markersize,
-                         edgecolors='none', cmap=cmap, vmin=color_range[0], vmax=color_range[1])
+                         edgecolors=ec, cmap=cmap, vmin=color_range[0], vmax=color_range[1])
     else:
         cax = ax.scatter(np.sqrt((x_all/w.xy_scale)**2+(y_all/w.xy_scale)**2), z_all/w.z_scale, c=c_all/c_all.max()*1000, s=markersize,
-                         edgecolors='none', cmap=cmap, vmax=colormap_cutoff*1000)
+                         edgecolors=ec, cmap=cmap, vmax=colormap_cutoff*1000)
 
     nice_spines(ax, grid=False, dark=dark_background)
     ax.autoscale(tight=1)
@@ -1954,6 +1956,60 @@ def relabel_peaks(a):
                     to_add += 1
     return a
 
+
+def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=None, axis=False, plot_vector=None):
+
+    almost_black = '#262626'
+
+    index = w._get_indices(only_selected_cells)
+    pts = np.vstack(w.df.centroid_rescaled[index])
+
+    if channel is not None:
+        c = np.vstack(w.df[channel][index])
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    if channel is not None:
+        ax.scatter(pts[:, 1], pts[:, 2], pts[:, 0], c=c, vmax=vmax, cmap='inferno', marker='o', s=40)
+    else:
+        ax.scatter(pts[:, 1], pts[:, 2], pts[:, 0], c=almost_black, marker='o', s=40)
+    if not axis:
+        ax.axis('off')
+    ax.grid('on')
+    ax.set_axis_bgcolor('white')
+
+
+    if cut:
+        x = np.array([0, 100, 100, 0]) + pts[:, 1].mean()
+        y = np.array([0, 0, 0, 0]) + pts[:, 2].mean()
+        z = [110, 110, 0, 0] - 2 * pts[:, 0].mean() - 10
+        verts = [list(zip(x, y, z))]
+        poly = Poly3DCollection(verts)
+        ax.add_collection3d(poly, zs='z')
+        poly.set_alpha(0.1)
+
+    if plot_vector is not None:
+        if len(plot_vector) != 6:
+            raise RuntimeError('array must be of length 6, (x,y,z location and u,v,w direction)')
+        soa = plot_vector
+        vlength = np.linalg.norm(soa)
+        X, Y, Z, U, V, W = zip(soa)
+        ax.quiver(X, Y, Z, U, V, W, pivot='tail', length=vlength, arrow_length_ratio=0.3 / vlength)
+
+    ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
+
+    if filename is not None:
+        fig.savefig(filename)
+
+
+def axisEqual3D(ax):
+    extents = np.array([getattr(ax, 'get_{}lim'.format(dim))() for dim in 'xyz'])
+    sz = extents[:,1] - extents[:,0]
+    centers = np.mean(extents, axis=1)
+    maxsize = max(abs(sz))
+    r = maxsize/2
+    for ctr, dim in zip(centers, 'xyz'):
+        getattr(ax, 'set_{}lim'.format(dim))(ctr - r, ctr + r)
 
 def radius_of_gyration(centroid_rescaled):
     """
