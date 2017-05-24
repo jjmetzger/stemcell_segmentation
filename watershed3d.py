@@ -578,7 +578,7 @@ class Ws3d(object):
                 if show_labels:
                     peak_counter = 1
                     for ipeaks in range(self.peaks.shape[0]):
-                        axes[1].text(self.peaks[:, 2], self.peaks[:, 1], str(peak_counter),
+                        ax[1].text(self.peaks[:, 2], self.peaks[:, 1], str(peak_counter),
                                         color='r', fontsize=22)
                         peak_counter += 1
             else:
