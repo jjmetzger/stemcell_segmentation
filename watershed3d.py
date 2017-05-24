@@ -36,7 +36,7 @@ class Ws3d(object):
     object classifier from Ilastik, uses this for seeding. Otherwise tries to guess blobs for seeding.
     """
 
-    def __init__(self, imagefile, xy_scale=1.0, z_scale=1.0, z=None):
+    def __init__(self, imagefile, xy_scale=1.0, z_scale=1.0, z=None, verbose=False):
         """
         Initializes Ws3d with an imagefile. Can set the relative x,y and z scales of the z-stack, which is important
         for the blob
@@ -54,12 +54,14 @@ class Ws3d(object):
         self.image_stack = io.imread(imagefile)
         self.image_dim = self.image_stack.ndim
         if self.image_dim == 2:
-            print('image is two-dimensional')
+            if verbose:
+                print('image is two-dimensional')
             self.x_size, self.y_size = self.image_stack.shape
             self.z_size, self.z_scale = None, None
 
         elif self.image_dim == 3:
-            print('image is three-dimensional')
+            if verbose:
+                print('image is three-dimensional')
             self.z_size, self.x_size, self.y_size = self.image_stack.shape
             if self.z_size > self.x_size or self.z_size > self.y_size:
                 raise RuntimeError("ERROR: z must be the first and smallest dimension")
@@ -91,7 +93,8 @@ class Ws3d(object):
             raise RuntimeError('Error: file', self.probability_map_filename, 'not found. Did you do the Ilastik '
                                                                              'classification?')
         else:
-            print('found probability map', self.probability_map_filename)
+            if verbose:
+                print('found probability map', self.probability_map_filename)
         self.mask = None
         self.mask_selected = None
 
@@ -105,7 +108,7 @@ class Ws3d(object):
 
         self.find_center_of_colony()
 
-    def load_mask(self, method='ilastik', prob=0.5, foreground_index=1):
+    def load_mask(self, method='ilastik', prob=0.5, foreground_index=1, verbose=False):
         """
         Load the probability mask and object prediction if it exists.
 
@@ -123,14 +126,16 @@ class Ws3d(object):
             else:
                 raise RuntimeError('unkonwn dimension')
 
-            print("shape", self.probability_map.shape, self.image_stack.shape)
+            if verbose:
+                print("shape", self.probability_map.shape, self.image_stack.shape)
             if not self.probability_map.shape == self.image_stack.shape:
                 print("ERROR: probability map does not have same dimensions as image", self.probability_map.shape,
                       self.image_stack.shape)
                 return
 
             self.mask = self.probability_map > prob
-            print('loaded probability map')
+            if verbose:
+                print('loaded probability map')
             # self.probability_map[self.probability_map < prob] = 0.
 
             # load object prediction if there
@@ -138,7 +143,8 @@ class Ws3d(object):
                 if self.image_dim == 3:
                     with h5py.File(re.sub('\.tif$', '_Object Predictions.h5', self.filename, re.IGNORECASE), 'r') as h:
                         self.op = np.swapaxes(np.squeeze(h['exported_data']), 2, 0)  # object prediction
-                    print('loaded object prediction')
+                    if verbose:
+                        print('loaded object prediction')
                 else:
                     raise NotImplementedError("not implemented for 2d")
 
@@ -374,7 +380,7 @@ class Ws3d(object):
     #             print('segmentation done, found', self.peaks.shape[0], 'cells')
 
     def segment(self, min_distance=2, sigma=None, do_not_use_object_classifier=True, opensize_small_objects=10,
-                remove_small_nuclei=False, cyto_size=None, compactness=0.01):
+                remove_small_nuclei=False, cyto_size=None, compactness=0.01, verbose=False):
         """
         Segment the image.
 
@@ -470,7 +476,8 @@ class Ws3d(object):
             # self.radius_of_gyration = radius_of_gyration()
             # self.center_of_mass, self.radius_of_gyration = radius_of_gyration(self.df.centroids_rescaled)
 
-            print('segmentation done, found', self.peaks.shape[0], 'cells')
+            if verbose:
+                print('segmentation done, found', self.peaks.shape[0], 'cells')
 
     @staticmethod
     def _regionprops_to_dataframe(ws, image_stack, cyto=None, average_method=np.median, xyscale=1., zscale=1.):
@@ -525,7 +532,7 @@ class Ws3d(object):
         if figsize is None:
             figsize = (12, 12)
         # self.grid_plot(self.image_stack,  z=z, contrast_stretch=contrast_stretch, figsize=figsize)
-        _, ax = plt.subplots(1, 2, figsize=figsize)
+        fig, ax = plt.subplots(1, 2, figsize=figsize)
 
         # show seeds on the original image
         if self.image_dim == 3:
@@ -573,6 +580,9 @@ class Ws3d(object):
             ax[1].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr')
             ax[1].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
             ax[1].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
+
+        return fig
+
 
     def write_image_with_seeds(self, filename='image_with_seeds.tif'):
         """
@@ -1957,7 +1967,7 @@ def relabel_peaks(a):
     return a
 
 
-def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=None, axis=False, plot_vector=None):
+def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=None, axis=False, plot_vector=None, vectorprop):
 
     almost_black = '#262626'
 
@@ -1997,16 +2007,17 @@ def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=
         ax.quiver(X, Y, Z, U, V, W, pivot='tail', length=vlength, arrow_length_ratio=0.3 / vlength)
 
     # ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
-    xrange = pts[1,:].max() - pts[1,:].min()
-    yrange = pts[2,:].max() - pts[2,:].min()
-    zrange = pts[0,:].max() - pts[0,:].min()
-    maxrange = max(xrange, yrange, zrange)
-    xrange = [pts[1, :].mean() - maxrange/2, pts[1, :].mean() + maxrange/2]
-    yrange = [pts[2, :].mean() - maxrange/2, pts[2, :].mean() + maxrange/2]
-    zrange = [pts[0, :].mean() - maxrange/2, pts[0, :].mean() + maxrange/2]
+    if xyz_scale is None:
+    # xrange = pts[1,:].max() - pts[1,:].min()
+    # yrange = pts[2,:].max() - pts[2,:].min()
+    # zrange = pts[0,:].max() - pts[0,:].min()
+    # maxrange = max(xrange, yrange, zrange)
+    # xrange = [pts[1, :].mean() - maxrange/2, pts[1, :].mean() + maxrange/2]
+    # yrange = [pts[2, :].mean() - maxrange/2, pts[2, :].mean() + maxrange/2]
+    # zrange = [pts[0, :].mean() - maxrange/2, pts[0, :].mean() + maxrange/2]
 
     ax.auto_scale_xyz(xrange, yrange, zrange)
-    # ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
+    ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
 
 
     if filename is not None:
