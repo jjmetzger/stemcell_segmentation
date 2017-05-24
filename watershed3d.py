@@ -1967,7 +1967,7 @@ def relabel_peaks(a):
     return a
 
 
-def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=None, axis=False, plot_vector=None, vectorprop):
+def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=None, axis=False, plot_vector=None):
 
     almost_black = '#262626'
 
@@ -2008,17 +2008,16 @@ def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=
 
     # ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
     if xyz_scale is None:
-    # xrange = pts[1,:].max() - pts[1,:].min()
-    # yrange = pts[2,:].max() - pts[2,:].min()
-    # zrange = pts[0,:].max() - pts[0,:].min()
+        xrange = pts[1,:].max() - pts[1,:].min()
+        yrange = pts[2,:].max() - pts[2,:].min()
+        zrange = pts[0,:].max() - pts[0,:].min()
     # maxrange = max(xrange, yrange, zrange)
     # xrange = [pts[1, :].mean() - maxrange/2, pts[1, :].mean() + maxrange/2]
     # yrange = [pts[2, :].mean() - maxrange/2, pts[2, :].mean() + maxrange/2]
     # zrange = [pts[0, :].mean() - maxrange/2, pts[0, :].mean() + maxrange/2]
 
     ax.auto_scale_xyz(xrange, yrange, zrange)
-    ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
-
+    # ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
 
     if filename is not None:
         fig.savefig(filename)
