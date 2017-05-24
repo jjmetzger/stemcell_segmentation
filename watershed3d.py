@@ -249,6 +249,7 @@ class Ws3d(object):
                 fig.tight_layout()
 
         if return_fig:
+            plt.close(fig)
             return fig
 
     def intensity_histogram(self):
