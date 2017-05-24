@@ -247,6 +247,8 @@ class Ws3d(object):
                     if not (len(ax.images)):
                         fig.delaxes(ax)
                 fig.tight_layout()
+        
+        return fig
 
     def intensity_histogram(self):
 
