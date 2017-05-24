@@ -174,7 +174,7 @@ class Ws3d(object):
             self.grid_plot(self.probability_map, z, contrast_stretch, figsize)
 
 
-    def grid_plot(self, z=None, contrast_stretch=False, figsize=None, cmap=None):
+    def grid_plot(self, z=None, contrast_stretch=False, figsize=None, cmap=None, return_fig=False):
         """
         Plot all z-slices
 
@@ -247,8 +247,9 @@ class Ws3d(object):
                     if not (len(ax.images)):
                         fig.delaxes(ax)
                 fig.tight_layout()
-        
-        return fig
+
+        if return_fig:
+            return fig
 
     def intensity_histogram(self):
 
@@ -718,6 +719,8 @@ class Ws3d(object):
 
         self.df = pd.concat([self.df, channel_df[channel_id]], axis=1) # only take the channeld_id channel, i.e. total intensity
         self.channels_image[channel_id] = im
+
+        self.df = pd.concat([self.df, self.df[channel_id] / self.df.mean_intensity], axis=1).rename(columns={0: channel_id + '_norm'})
 
     def find_center_of_colony(self):
         """
