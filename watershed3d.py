@@ -520,7 +520,7 @@ class Ws3d(object):
             # print('len rp=', len(rp))
             return pd.DataFrame([rpd, rpd_cyto], index=indices, columns=columns)
 
-    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130):
+    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False):
         """
         Show segmentation on the maximum intensity projection or per z-slice
 
@@ -574,6 +574,13 @@ class Ws3d(object):
         if self.image_dim == 3:
             if z is None:
                 ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
+
+                if show_labels:
+                    peak_counter = 1
+                    for ipeaks in range(self.peaks.shape[0]):
+                        axes[1].text(self.peaks[:, 2], self.peaks[:, 1], str(peak_counter),
+                                        color='r', fontsize=22)
+                        peak_counter += 1
             else:
                 ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed))
             ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
@@ -721,7 +728,13 @@ class Ws3d(object):
         self.df = pd.concat([self.df, channel_df[channel_id]], axis=1) # only take the channeld_id channel, i.e. total intensity
         self.channels_image[channel_id] = im
 
-        self.df = pd.concat([self.df, self.df[channel_id] / self.df.mean_intensity], axis=1).rename(columns={0: channel_id + '_norm'})
+        normed_id = channel_id + '_norm'
+        try:
+            self.df.drop(normed_id, axis=1, inplace=1)
+        except ValueError:  # does not exist
+            pass
+
+        self.df = pd.concat([self.df, self.df[channel_id] / self.df.mean_intensity], axis=1).rename(columns={0: normed_id})
 
     def find_center_of_colony(self):
         """
