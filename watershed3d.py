@@ -520,7 +520,7 @@ class Ws3d(object):
             # print('len rp=', len(rp))
             return pd.DataFrame([rpd, rpd_cyto], index=indices, columns=columns)
 
-    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False):
+    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False, title=None):
         """
         Show segmentation on the maximum intensity projection or per z-slice
 
@@ -559,7 +559,10 @@ class Ws3d(object):
 
         if self.image_dim == 3:
             if z is None:
-                ax[0].set_title('maximum intensity projection')
+                if title is None:
+                    ax[0].set_title('maximum intensity projection')
+                else:
+                    ax[0].set_title(title)
             else:
                 ax[0].set_title('z = ' + str(z))
             ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
@@ -574,7 +577,6 @@ class Ws3d(object):
         if self.image_dim == 3:
             if z is None:
                 ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
-
                 if show_labels:
                     peak_counter = 1
                     for ipeaks in range(self.peaks.shape[0]):
