@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import h5py
+import warnings
 import matplotlib as mpl
 from scipy import ndimage as ndi
 from skimage.feature import peak_local_max
@@ -432,6 +433,7 @@ class Ws3d(object):
 
             self.peaks = np.transpose(np.nonzero(self.peak_array))  # same as above with indices True, but need that too
             markers = ndi.label(self.peak_array)[0]
+            # self.markers = markers
 
             # check for version because compactness is only available in watershed > 0.12
             if LooseVersion(skimage.__version__) > LooseVersion('0.13'):
@@ -577,12 +579,19 @@ class Ws3d(object):
         if self.image_dim == 3:
             if z is None:
                 ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
+                # if show_labels:
+                #     peak_counter = 1
+                #     for ipeaks in range(self.peaks.shape[0]):
+                #         ax[1].text(self.peaks[ipeaks, 2], self.peaks[ipeaks, 1], str(peak_counter),
+                #                         color='r', fontsize=22)
+                #         peak_counter += 1
                 if show_labels:
-                    peak_counter = 1
-                    for ipeaks in range(self.peaks.shape[0]):
-                        ax[1].text(self.peaks[ipeaks, 2], self.peaks[ipeaks, 1], str(peak_counter),
+                    assert len(self.df) == self.peaks.shape[0]
+                    for ipeaks in range(len(self.df)):
+                        ax[1].text(self.df.iloc[ipeaks].centroid[2], self.df.iloc[ipeaks].centroid[1], str(self.df.iloc[ipeaks].label),
                                         color='r', fontsize=22)
-                        peak_counter += 1
+
+
             else:
                 ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed))
             ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
@@ -1053,6 +1062,30 @@ class Ws3d(object):
 
 # static methods
 #@staticmethod
+
+
+def dump_mask_and_images(w, filename, write_every_nth_z=1, compression=4):
+    """
+
+    :param w: watershed object
+    :param filename: filename to write output to
+    :param compression: compression level, from 0 to 9 (default is 4)
+    :return:
+    """
+
+    f = h5py.File(filename, 'w')
+    f.create_dataset('mask', data=w.mask[::write_every_nth_z], compression="gzip", compression_opts=compression)
+    f.create_dataset('dapi', data=w.image_stack[::write_every_nth_z], compression="gzip", compression_opts=compression)
+
+    if not w.channels_image: #empty channels
+        warnings.warn('No image channels to dump. Did you run apply_to_channels()?')
+    else:
+        for key in w.channels_image:
+            f.create_dataset(key, data=w.channels_image[key][::write_every_nth_z], compression="gzip", compression_opts=compression)
+
+    f.close()
+
+
 def remove_background_func(im, n=None):
     """
     basic method to remove background, returns background subtracted image
@@ -1508,7 +1541,7 @@ def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, o
         fig.savefig(filename)
 
 
-def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only_selected_cells=False, fontsize=20, filename=None, fit=False):
+def coexpression_per_cell(w_list, channel_id1, channel_id2, xy_lim=None, normalize=True, only_selected_cells=False, fontsize=20, filename=None, fit=False):
     """
     Scatter plot visualizing co-expression of two channels, with each datapoint the intensity of one cell.
 
@@ -1544,7 +1577,9 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only
     almost_black = '#262626'
     fig, ax = plt.subplots(figsize=(4,4))
     dd = pd.DataFrame(data=np.vstack((ch1_all, ch2_all)).T, columns=(channel_id1, channel_id2))
+    import seaborn as sns
     if fit:
+
         # ax.plot(np.unique(ch1_all), np.poly1d(np.polyfit(ch1_all, ch1_all, 1))(np.unique(ch1_all)), '--k', lw=0.5)
         # ax.scatter(ch1_all, ch2_all, edgecolors='none', alpha=0.8, color=almost_black)
         # sns.lmplot(x=channel_id1, y=channel_id2, data=dd, palette='Set1')
@@ -1565,6 +1600,9 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only
     if normalize:
         ax.set_xlim([0, 1])
         ax.set_ylim([0, 1])
+    if xy_lim is not None:
+        ax.set_xlim([0, xy_lim])
+        ax.set_ylim([0, xy_lim])
 
     sns.despine()
     fig.tight_layout()
@@ -1572,6 +1610,48 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, normalize=True, only
         plt.savefig(filename)
 
     return ch1_all, ch2_all
+
+
+def histogram_pixel(w_list, channel_id1, downsample=1, only_selected_cells=False, fontsize=16, bins=50, normalize=False):
+    """
+    Histogram of pixel intensities
+
+    :param w_list: watershed object or list of objects
+    :param channel_id1:
+    :param downsample: Usually have a lot of point, so can only use ever downsample'th point.
+    :param only_selected_cells:
+    :param fontsize: of labels
+    :param bins: number of bins
+    :param normalize: normalize by DAPI
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    ch1_all = np.zeros((0,))
+
+    for w in w_list:
+        ch1 = w.channels_image[channel_id1]
+
+        if only_selected_cells:
+            mask = w.mask_selected
+        else:
+            mask = w.mask
+
+        if normalize:
+            to_add = ch1[mask > 0][::downsample]/(w.image_stack[mask>0][::downsample])
+        else:
+            to_add = ch1[mask > 0][::downsample]
+
+        ch1_all = np.hstack((ch1_all, to_add))
+
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.hist(ch1_all, bins=bins);
+    # d_masked = np.ma.masked_where(d == 0, d)  # mask zero bins in plot
+    # ax.imshow(d_masked.T, extent=[x[0], x[-1], y[0], y[-1]], cmap='magma_r', origin='low')
+
+    nice_spines(ax)
+    ax.set_xlabel(channel_id1, fontsize=fontsize)
+    # ax.autoscale(tight=1)
 
 
 def coexpression_per_pixel(w_list, channel_id1, channel_id2, downsample=1, only_selected_cells=False, fontsize=16,
