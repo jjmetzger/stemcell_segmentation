@@ -9,7 +9,7 @@ from skimage.feature import peak_local_max
 import skimage
 from scipy.ndimage.filters import maximum_filter, gaussian_filter
 # from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
-from skimage.morphology import ball, disk, binary_erosion, remove_small_objects, binary_dilation
+from skimage.morphology import ball, disk, binary_erosion, remove_small_objects, binary_dilation, binary_closing
 # from skimage.segmentation import random_walker
 import numpy as np
 import skimage.io as io
@@ -761,7 +761,8 @@ class Ws3d(object):
         find center of mass
         """
 
-        self.center = np.array(center_of_mass(np.abs(self.image_stack)))
+        # self.center = np.array(center_of_mass(np.abs(self.image_stack)))
+        self.center = center_of_mass(binary_closing(self.mask.max(axis=0), selem=disk(10)))
         # take middle of stack        
 #         middle = int(np.round(self.image_stack.shape[0] /2))
 #         center_xy = np.array(center_of_mass(np.abs(self.image_stack[middle])))
