@@ -9,7 +9,7 @@ from skimage.feature import peak_local_max
 import skimage
 from scipy.ndimage.filters import maximum_filter, gaussian_filter
 # from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
-from skimage.morphology import ball, disk, binary_erosion, remove_small_objects, binary_dilation, binary_closing
+from skimage.morphology import ball, disk, binary_erosion, remove_small_objects, binary_dilation, binary_closing, dilation
 # from skimage.segmentation import random_walker
 import numpy as np
 import skimage.io as io
@@ -82,6 +82,7 @@ class Ws3d(object):
         self.labels_cyto = None
         # self.good_nuclei = None
         self.center = None
+        self.cyto_size = None
         # self.channels = {}
         self.channels_image = {}
         p_re = re.compile('\.tif{1,2}$', re.I)
@@ -106,8 +107,6 @@ class Ws3d(object):
         if not os.path.isfile(self.filename_op):
             # print('No object prediction file ({:s}) found - segmenting without.'.format(self.filename_op))
             self.have_op = False
-
-        self.find_center_of_colony()
 
     def load_mask(self, method='ilastik', prob=0.5, foreground_index=1, verbose=False):
         """
@@ -162,6 +161,8 @@ class Ws3d(object):
 
         else:
             raise RuntimeError('unknown method')
+
+        self.find_center_of_colony()
 
     def plot_probability_map(self, z=None, contrast_stretch=False, figsize=None):
 
@@ -404,6 +405,8 @@ class Ws3d(object):
         :param z: if have 3d image, can give z or range of z to be segmentent as 2d images
         """
 
+        self.cyto_size = cyto_size
+
         if self.probability_map is None and self.mask is None:
             print('ERROR: neither probability map or mask loaded, cannot segment - use load_mask first')
             return
@@ -465,8 +468,10 @@ class Ws3d(object):
                 else:
                     selem = ball(cyto_size)
 
-                extended_mask = binary_dilation(self.ws, selem=selem)
-                self.labels_cyto = skimage.morphology.watershed(-self.image_stack, markers, mask=extended_mask)
+                # extended_mask = binary_dilation(self.mask, selem=selem)
+                # self.em = extended_mask
+                # self.labels_cyto = skimage.morphology.watershed(pm, ndi.label(self.peak_array)[0], mask=self.mask, compactness=compactness)
+                self.labels_cyto = dilation(self.ws, selem=selem)
                 self.labels_cyto[self.ws > 0] = 0
                 # self.perimeter_cyto = np.ma.masked_where(self.labels_cyto < 1, self.labels_cyto)
                 # border = binary_erosion(self.labels, selem=disk(8))
@@ -522,16 +527,30 @@ class Ws3d(object):
             return pd.DataFrame(rpd, index=indices, columns=columns)
         else:
             rp_cyto = skimage.measure.regionprops(cyto, intensity_image=image_stack)
-            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'area_cyto', 'total_intensity_cyto',
+            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled', 'label', 'area_cyto', 'total_intensity_cyto',
                        'mean_intensity_cyto')
-            rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-            rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity] for i1 in rp_cyto]
-            indices = [i1.label for i1 in rp]
-            indices = pd.Index(indices, name='cell_id')
-            # print('len rp=', len(rp))
-            return pd.DataFrame([rpd, rpd_cyto], index=indices, columns=columns)
+            # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
+            # rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.label] for i1 in rp_cyto]
+            rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
 
-    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False, title=None):
+            # indices = [i1.label for i1 in rp]
+            # indices_cyto = [i1.label for i1 in rp_cyto]
+            # indices = pd.Index(indices, name='cell_id')
+            # print('len rp=', len(rp))
+
+            columns1 = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled', 'label')
+            columns2 = ('area_cyto', 'total_intensity_cyto', 'mean_intensity_cyto', 'label')
+            df1 = pd.DataFrame(rpd, columns=columns1)
+            df2 = pd.DataFrame(rpd_cyto, columns=columns2)
+
+            # need to remove those without cytoplasm
+
+            # return pd.DataFrame(pd.concat([df1, df2], axis=1), index=indices, columns=columns)
+            return pd.merge(df1,df2, on='label')
+            # return pd.DataFrame(rpd, index=indices, columns=columns, axis=1)
+
+    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False, title=None, plot_cyto=False):
         """
         Show segmentation on the maximum intensity projection or per z-slice
 
@@ -587,7 +606,7 @@ class Ws3d(object):
         # show watershed. Do it on the dataframe since may have deleted cells
         if self.image_dim == 3:
             if z is None:
-                ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed))
+                ax[1].imshow(self.ws.max(axis=0), cmap=self.myrandom_cmap(seed=seed), vmin=0,vmax=1024)
                 # if show_labels:
                 #     peak_counter = 1
                 #     for ipeaks in range(self.peaks.shape[0]):
@@ -600,19 +619,27 @@ class Ws3d(object):
                         ax[1].text(self.df.iloc[ipeaks].centroid[2], self.df.iloc[ipeaks].centroid[1], str(self.df.iloc[ipeaks].label),
                                         color='r', fontsize=22)
 
-
             else:
-                ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed))
+                if plot_cyto and self.cyto_size is not None:
+                    ax[1].imshow(np.ma.masked_equal(self.labels_cyto[z], 0), cmap=random_cmap(seed=123, return_darker=1)[1], vmin=0,vmax=1024)
+                    ax[1].imshow(np.ma.masked_equal(self.ws[z], 0), cmap=random_cmap(seed=123), vmin=0,vmax=1024)
+                    # ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=1))
+                    # ax[1].imshow(self.labels_cyto[z], cmap=self.myrandom_cmap(seed=seed))
+                else:
+                    ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=1), vmin=0,vmax=1024)
+
+
             ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
             ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
             ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
+
         else:
-            ax[1].imshow(self.ws, cmap=self.myrandom_cmap(seed=seed))
+            ax[1].imshow(self.ws, cmap=self.myrandom_cmap(seed=seed), vmin=0,vmax=1024)
             ax[1].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr')
             ax[1].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
             ax[1].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
 
-        return fig
+        # return fig
 
 
     def write_image_with_seeds(self, filename='image_with_seeds.tif'):
@@ -707,11 +734,11 @@ class Ws3d(object):
             # show watershed after selections.
             if self.image_dim == 3:
                 if z is None:
-                    ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower')
+                    ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0,vmax=1024)
                 else:
-                    ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower')
+                    ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0,vmax=1024)
             else:
-                ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower')
+                ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0,vmax=1024)
             ax.set_title('after selection of good nuclei')
 
     def apply_to_channels(self, filename, channel_id, remove_background=False, average_method=np.median):
@@ -2024,7 +2051,7 @@ def browse_stack(w):
     # self._contrast_stretch
     # plt.figu
     def view_image(i):
-        plt.imshow(w.ws[i], cmap=random_cmap(seed=123), alpha=0.7)
+        plt.imshow(w.ws[i], cmap=random_cmap(seed=123), alpha=0.7, vmin=0,vmax=1024)
 
         peak_counter = 1
         seeds_in_current_z = w.peaks[w.peaks[:, 0] == i][:, 1:]  # find seeds that are in the current z
