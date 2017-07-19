@@ -626,7 +626,7 @@ class Ws3d(object):
                     # ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=1))
                     # ax[1].imshow(self.labels_cyto[z], cmap=self.myrandom_cmap(seed=seed))
                 else:
-                    ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=1), vmin=0,vmax=1024)
+                    ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=1)[0], vmin=0,vmax=1024)
 
 
             ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
