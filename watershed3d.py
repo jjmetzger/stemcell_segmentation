@@ -789,7 +789,8 @@ class Ws3d(object):
         """
 
         # self.center = np.array(center_of_mass(np.abs(self.image_stack)))
-        self.center = center_of_mass(binary_closing(self.mask.max(axis=0), selem=disk(10)))
+        center_xy = center_of_mass(binary_closing(self.mask.max(axis=0), selem=disk(10)))
+        self.center = np.array([0., center_xy[0], center_xy[1]])
         # take middle of stack        
 #         middle = int(np.round(self.image_stack.shape[0] /2))
 #         center_xy = np.array(center_of_mass(np.abs(self.image_stack[middle])))
