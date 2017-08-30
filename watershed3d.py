@@ -1621,7 +1621,7 @@ def coexpression_per_cell(w_list, channel_id1, channel_id2, xy_lim=None, normali
         # ax.plot(np.unique(ch1_all), np.poly1d(np.polyfit(ch1_all, ch1_all, 1))(np.unique(ch1_all)), '--k', lw=0.5)
         # ax.scatter(ch1_all, ch2_all, edgecolors='none', alpha=0.8, color=almost_black)
         # sns.lmplot(x=channel_id1, y=channel_id2, data=dd, palette='Set1')
-        sns.regplot(x=channel_id1, y=channel_id2, data=dd, ax=ax, color='paleturquoise')
+        sns.regplot(x=channel_id1, y=channel_id2, data=dd, ax=ax, color=almost_black)
         # print(ch1_all.shape, ch2_all.shape`)
     else:
         # ax.scatter(ch1_all, ch2_all)
