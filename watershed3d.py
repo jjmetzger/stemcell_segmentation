@@ -1256,7 +1256,7 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
 
 
 def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True, binsize=None, filename=None,
-                     xcutoff=None, mask=True):
+                     xcutoff=None, mask=True, normalize=False):
     """
     Get radial intensity AS A FUNCTION OF Z, either for all nuclei or only selected ones. This uses the pixel information,
     not the segmentation.
@@ -1278,8 +1278,8 @@ def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True
     w_list = make_iterable(w_list)
     radial_profile_all = []
 
-    if len(w_list) > 1:
-        raise NotImplementedError('currently not implemented for multiple colonies')
+    # if len(w_list) > 1:
+    #     raise NotImplementedError('currently not implemented for multiple colonies')
 
     for w in w_list:
         data = w.channels_image[channel_id]
@@ -1291,6 +1291,11 @@ def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True
         else:
             mask = w.mask
         data[~mask] = 0  # set all False values to 0
+
+        #normalize data
+        if normalize:
+            data = data/w.image_stack
+            data[np.isinf(data)] = 0. # set division by zero to 0
 
         if w.image_dim == 3:
             x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
@@ -2120,7 +2125,7 @@ def relabel_peaks(a):
     return a
 
 
-def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=None, axis=False, plot_vector=None):
+def scatter3d(w, channel, cut=0, xyz_scale=None, only_selected_cells=False, vmax=None, filename=None, axis=False, plot_vector=None):
 
     almost_black = '#262626'
 
@@ -2160,10 +2165,10 @@ def scatter3d(w, channel, cut=0, only_selected_cells=False, vmax=None, filename=
         ax.quiver(X, Y, Z, U, V, W, pivot='tail', length=vlength, arrow_length_ratio=0.3 / vlength)
 
     # ax.auto_scale_xyz([30, 160], [30, 160], [0, 130])
-    if xyz_scale is None:
-        xrange = pts[1,:].max() - pts[1,:].min()
-        yrange = pts[2,:].max() - pts[2,:].min()
-        zrange = pts[0,:].max() - pts[0,:].min()
+    # if xyz_scale is None:
+    #     xrange = pts[1,:].max() - pts[1,:].min()
+    #     yrange = pts[2,:].max() - pts[2,:].min()
+    #     zrange = pts[0,:].max() - pts[0,:].min()
     # maxrange = max(xrange, yrange, zrange)
     # xrange = [pts[1, :].mean() - maxrange/2, pts[1, :].mean() + maxrange/2]
     # yrange = [pts[2, :].mean() - maxrange/2, pts[2, :].mean() + maxrange/2]
