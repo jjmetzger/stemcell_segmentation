@@ -789,7 +789,11 @@ class Ws3d(object):
         """
 
         # self.center = np.array(center_of_mass(np.abs(self.image_stack)))
-        center_xy = center_of_mass(binary_closing(self.mask.max(axis=0), selem=disk(10)))
+        if self.image_dim == 2:
+            center_xy = center_of_mass(binary_closing(self.mask, selem=disk(10)))
+        else:
+            center_xy = center_of_mass(binary_closing(self.mask.max(axis=0), selem=disk(10)))
+
         self.center = np.array([0., center_xy[0], center_xy[1]])
         # take middle of stack        
 #         middle = int(np.round(self.image_stack.shape[0] /2))
@@ -1296,6 +1300,7 @@ def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True
         if normalize:
             data = data/w.image_stack
             data[np.isinf(data)] = 0. # set division by zero to 0
+            # data /= data.max() #normalize to between 0..1
 
         if w.image_dim == 3:
             x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
