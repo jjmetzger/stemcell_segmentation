@@ -1390,6 +1390,61 @@ def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True
     return np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
 
 
+
+def radial_intensity_z_stack(stack, center, plot=True, binsize=None, filename=None,
+                     xcutoff=None, normalize=False):
+    """
+    Get radial intensity AS A FUNCTION OF Z FOR AN ARBITRARY STACK
+
+    :param channel_id:
+    :param only_selected_nuclei:
+    :param plot:
+    :param binsize:
+    :param filename: if specified, write the data (r, radial_intensity) to a txt file
+    :param xcutoff:
+    :return:
+    """
+
+    data = stack
+    #
+    # #normalize data
+    # if normalize:
+    #     data = data/w.image_stack
+    #     data[np.isinf(data)] = 0. # set division by zero to 0
+    #     # data /= data.max() #normalize to between 0..1
+
+    x, y = np.indices(data.shape[1:])  # note changed NON-inversion of x and y
+    r = np.sqrt((x - center[1]) ** 2 + (y - center[2]) ** 2)
+    r = r.astype(np.int)
+    # now make 3d
+    r = np.tile(r, (data.shape[0], 1, 1))
+
+    # split into different z
+    rshape = np.unique(r.ravel()).shape[0]  # this is the r bin vector
+    tbinz = np.zeros((data.shape[0], rshape))
+    for zz in range(data.shape[0]):
+        tbinz[zz] = np.bincount(r[zz].ravel(), data[zz].ravel())  # bincount makes +1 counts
+
+    nrz = np.zeros((data.shape[0], rshape))
+    for zz in range(data.shape[0]):
+        nrz[zz] = np.bincount(r[zz].ravel())
+    # else:
+    #     for zz in range(data.shape[0]):
+    #         nrz[zz] = np.bincount(r[zz].ravel(), mask[zz].astype(np.int).ravel())  # this line makes the average, i.e. since
+        # we have
+        # more bins with certain r's, must divide by abundance. If have mask, some of those should not be
+        # counted, because they were set to zero above and should not contribute to the average.
+    radialprofilez = tbinz / nrz
+    if np.isnan(radialprofilez).any():
+        # print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+        radialprofilez[np.isnan(radialprofilez)] = 0.  # set these to 0
+
+    return np.arange(rshape), radialprofilez
+
+
+
+
+
 def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_selected_cells=False, fontsize=16):
     """
 
@@ -2056,7 +2111,7 @@ def running_mean(x, N):
     return (cumsum[N:] - cumsum[:-N]) / N
 
 
-def browse_stack(w):
+def browse_stack(w, plot_number=True):
 
     n = len(w.ws)
     # self._contrast_stretch
@@ -2075,9 +2130,10 @@ def browse_stack(w):
         #                    color='r', fontsize=22)
         for ipeaks in range(len(w.df)):
             if int(np.round(w.df.iloc[ipeaks].centroid[0])) == i:
-                plt.text(w.df.iloc[ipeaks].centroid[2], w.df.iloc[ipeaks].centroid[1],
-                                str(w.df.iloc[ipeaks].label),
-                                color='r', fontsize=22)
+                if plot_number:
+                    plt.text(w.df.iloc[ipeaks].centroid[2], w.df.iloc[ipeaks].centroid[1],
+                                    str(w.df.iloc[ipeaks].label),
+                                    color='r', fontsize=22)
                 plt.plot(w.df.iloc[ipeaks].centroid[2], w.df.iloc[ipeaks].centroid[1], 'xr')
 
 
@@ -2088,6 +2144,19 @@ def browse_stack(w):
         # plt.plot(seeds_in_current_z[:, 1], seeds_in_current_z[:, 0], 'xr')
         plt.xlim(w.peaks[:, 2].min() - 20, w.peaks[:, 2].max() + 20)
         plt.ylim(w.peaks[:, 1].min() - 20, w.peaks[:, 1].max() + 20)
+        plt.axis('off')
+        plt.show()
+
+    interact(view_image, i=(0, n - 1))
+
+
+def visualize_stack(w, plot_number=True, cmap='viridis'):
+    """visualize arbitrary stack"""
+
+    n = len(w)
+    cmax, cmin = w.max(), w.min()
+    def view_image(i):
+        plt.imshow(w[i], cmap=cmap, vmin=cmin,vmax=cmax)
         plt.axis('off')
         plt.show()
 
