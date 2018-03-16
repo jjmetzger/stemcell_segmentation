@@ -24,6 +24,7 @@ from ipywidgets import interact
 from numba import jit
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+import matplotlib
 
 # import seaborn as sns
 
@@ -1559,6 +1560,90 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
 
     if filename is not None:
         fig.savefig(filename)
+
+
+def radial_histogram_plot(w_list, channel_id, clip_quantile=100, bins=25, average_func=np.mean, only_selected_cells=False, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis, figsize=(4,4)):
+    """
+    Radial histogram weighted by expression
+
+    :param w_list: watershed object or list of objects
+    :param channel_id:
+    :param color_range: cutoff at this quantile (100 doesn't cut off anything, try 97 or so to saturate colormap
+    :param only_selected_cells:
+    :param markersize:
+    :param colorbar: whether to plot a colorbar
+    :param r_limit: only plot cells smaller than this radius (in um)
+    :param axis: plot axes or not
+    :return:
+    """
+
+    w_list = make_iterable(w_list)
+    x_all = np.zeros((0,))
+    y_all = np.zeros((0,))
+    c_all = np.zeros((0,))
+
+    for w in w_list:
+
+        if w.image_dim == 3:
+            indices = (1, 2)
+        else:
+            indices = (0, 1)
+
+        index = w._get_indices(only_selected_cells)
+        x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[indices[0]]
+        y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[indices[1]]
+        c = w.df[channel_id][index].values
+
+        if r_limit is not None:
+            index_smaller_than_r = (x**2 + y**2)<r_limit**2
+            x = x[index_smaller_than_r]
+            y = y[index_smaller_than_r]
+            c = c[index_smaller_than_r]
+
+        x_all = np.hstack((x_all, x))
+        y_all = np.hstack((y_all, y))
+        c_all = np.hstack((c_all, c))
+
+    # normalize c and saturate (clip) using clip_quantile
+    c_all /= c_all.max()
+    c_clip = np.clip(c_all, c_all.min(), np.percentile(c_all, clip_quantile))
+    c_clip -= c_clip.min()
+    c_clip /= c_clip.max()
+
+    # NOTE physt radial histogram seems to have a bug in the weight
+    # if bins is None:
+    #     hist = special.polar_histogram(x_all, y_all, "human", weights=c_clip)
+    # else:
+    #     hist = special.polar_histogram(x_all, y_all, "human", bins, weights=c_clip)
+    #
+    # ax = hist.plot.polar_map(density=False, figsize=figsize, lw=0.1, show_zero=True, cmap=cmap)
+    # ax.set_yticklabels([])
+    # ax.set_xticklabels([])
+    # ax.grid('off')
+    # ax.set_theta_zero_location('N')
+
+    # can 'shake' existing data to fill holes - this is a bug in hexbin with weights
+    # shake = False
+    # if shake:
+    #     x2 = x_all + (np.random.randn(x_all.shape[0])) * x_all.max()/20 # move randomly by 1%
+    #     y2 = y_all + (np.random.randn(y_all.shape[0])) * y_all.max() /20  # move randomly by 1%
+    #     x_all = np.hstack((x_all, x2))
+    #     y_all = np.hstack((y_all, y2))
+    #     c_clip = np.hstack((c_clip,c_clip))
+    #     if r_limit is not None:
+    #         index_smaller_than_r = (x_all**2 + y_all**2)<r_limit**2
+    #         x_all = x_all[index_smaller_than_r]
+    #         y_all = y_all[index_smaller_than_r]
+    #         c_clip = c_clip[index_smaller_than_r]
+
+
+    fig,ax=plt.subplots(figsize=figsize)
+    hb = ax.hexbin(x_all, y_all, C=c_clip, gridsize=bins, mincnt=0, cmap=cmap, reduce_C_function=average_func)
+    cmap_mpl = matplotlib.cm.get_cmap(cmap)
+    ax.set_facecolor(cmap_mpl(0.))
+    if filename is not None:
+        fig.savefig(filename)
+
 
 
 def dot_plot_radial(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_selected_cells=False, markersize=30, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis, dark_background=False, ec='none'):
