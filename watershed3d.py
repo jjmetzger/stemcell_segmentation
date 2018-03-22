@@ -442,7 +442,7 @@ class Ws3d(object):
             else:
                 self.peak_array = peak_local_max(pm, min_distance=min_distance, indices=False)
 
-            self.peak_array = relabel_peaks(self.peak_array)
+            self.peak_array = relabel_peaks(self.peak_array.astype(np.int))
 
             self.peaks = np.transpose(np.nonzero(self.peak_array))  # same as above with indices True, but need that too
             markers = ndi.label(self.peak_array)[0]
@@ -520,20 +520,35 @@ class Ws3d(object):
         if cyto is None:
             columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled', 'label')
             # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
-
+            if ws.ndim == 3:
+                rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
+            elif ws.ndim == 2:
+                rpd = [[i1.area, average_method(image_stack[i1.coords[:, 0], i1.coords[:, 1]]),
+                        i1.mean_intensity, i1.coords.mean(axis=0),
+                        i1.coords.mean(axis=0) / np.array([xyscale, xyscale]), i1.label] for i1 in rp]
+            else:
+                raise RuntimeError('image dimensions must be 2 or 3')
             indices = [i1.label for i1 in rp]
             indices = pd.Index(indices, name='cell_id')
             # print('len rp=', len(rp))
             return pd.DataFrame(rpd, index=indices, columns=columns)
         else:
             rp_cyto = skimage.measure.regionprops(cyto, intensity_image=image_stack)
-            columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled', 'label', 'area_cyto', 'total_intensity_cyto',
-                       'mean_intensity_cyto')
-            # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-            rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
-            # rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.label] for i1 in rp_cyto]
-            rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
+            # columns = ('area', 'total_intensity', 'mean_intensity', 'centroid', 'centroid_rescaled', 'label', 'area_cyto', 'total_intensity_cyto',
+                       # 'mean_intensity_cyto')
+
+            if ws.ndim == 3:
+                # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+                rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
+                # rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.label] for i1 in rp_cyto]
+                rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
+            elif ws.ndim == 2:
+                # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
+                rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean()/np.array([xyscale, xyscale]), i1.label] for i1 in rp]
+                # rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.label] for i1 in rp_cyto]
+                rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
+            else:
+                raise RuntimeError('image dimensions must be 2 or 3')
 
             # indices = [i1.label for i1 in rp]
             # indices_cyto = [i1.label for i1 in rp_cyto]
@@ -551,7 +566,7 @@ class Ws3d(object):
             return pd.merge(df1,df2, on='label')
             # return pd.DataFrame(rpd, index=indices, columns=columns, axis=1)
 
-    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False, title=None, plot_cyto=False):
+    def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False, title=None, plot_cyto=False, ms=3):
         """
         Show segmentation on the maximum intensity projection or per z-slice
 
@@ -596,11 +611,11 @@ class Ws3d(object):
                     ax[0].set_title(title)
             else:
                 ax[0].set_title('z = ' + str(z))
-            ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
+            ax[0].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr', ms=ms)
             ax[0].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
             ax[0].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
         else:
-            ax[0].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr')
+            ax[0].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr', ms=ms)
             ax[0].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
             ax[0].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
 
@@ -629,14 +644,13 @@ class Ws3d(object):
                 else:
                     ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=1)[0], vmin=0,vmax=1024)
 
-
-            ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr')
+            ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr', ms=ms)
             ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
             ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
         else:
             ax[1].imshow(self.ws, cmap=self.myrandom_cmap(seed=seed), vmin=0,vmax=1024)
-            ax[1].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr')
+            ax[1].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr', ms=ms)
             ax[1].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
             ax[1].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
 
@@ -1134,7 +1148,7 @@ def remove_background_func(im, n=None):
     basic method to remove background, returns background subtracted image
 
     :param im: image
-    :param n: lowest non-zero n pixels are used to estimate background
+    :param n: maximum of the n'th lowest non-zero pixel are used as background estimate
     :return: background subtracted image
     """
     # TODO: check whether this can make negative intensities
@@ -1145,19 +1159,16 @@ def remove_background_func(im, n=None):
         imm = im.copy()
     else:
         raise RuntimeError("image has neither dimension 2 or 3")
-    # following in comments has a bug
-    # im -= np.partition(imm[imm.nonzero()], n)[:n].mean().astype(im.dtype)
-    # im[im<0.] = 0.  # set negatives to 0
-    # return im
 
     if n is None:
-#            if im.ndim == 2:
-#                n = 100
-#            else:
-#                n = 1000
-        n = int(0.028 * im.shape[0]*im.shape[1]*im.shape[2])
+        n = int(0.028 * np.prod(imm.shape)) # 2.8% seems to be a good number for circular micropatterns
+        # print(n)
 
-    return im - np.partition(imm[imm.nonzero()], n)[:n].max()  # fast way of getting lowest n nonzero values
+    lowest_n_max = np.partition(imm[imm.nonzero()], n)[:n].max()  # fast way of getting lowest n nonzero values. take the highest of those
+    mask_smaller0 = imm < lowest_n_max # remember those that would be smaller than 0, because images are usually uint, and that would lead to overflow
+    imm -= lowest_n_max
+    imm[mask_smaller0] = 0 # now set the ones that would be negative to 0
+    return imm
 
 
 def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, binsize=None, filename=None, xcutoff=None):
@@ -1522,8 +1533,10 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
             indices = (0, 1)
 
         index = w._get_indices(only_selected_cells)
-        x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[indices[0]]
-        y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[indices[1]]
+        # x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[indices[0]]
+        # y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[indices[1]]
+        x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[1] # center always has z
+        y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[2]
         c = w.df[channel_id][index].values
 
         if r_limit is not None:
@@ -2272,15 +2285,26 @@ def random_cmap(seed=None, return_darker=False, n=1024):
         return mpl.colors.ListedColormap(random_array)
 
 
-@jit
+# @jit
 def relabel_peaks(a):
+    # makes the peaks have a unique index: they are all==1, here they get a different number
     to_add = 1
-    for i1 in range(a.shape[0]):
-        for i2 in range(a.shape[1]):
-            for i3 in range(a.shape[2]):
-                if a[i1,i2,i3] == 1:
-                    a[i1,i2,i3] += to_add
+    if a.ndim == 3:
+        for i1 in range(a.shape[0]):
+            for i2 in range(a.shape[1]):
+                for i3 in range(a.shape[2]):
+                    if a[i1,i2,i3] == 1:
+                        a[i1,i2,i3] += to_add
+                        to_add += 1
+    elif a.ndim == 2:
+        for i1 in range(a.shape[0]):
+            for i2 in range(a.shape[1]):
+                if a[i1,i2] == 1:
+                    a[i1,i2] += to_add
                     to_add += 1
+    else:
+        raise RuntimeError('dimensions must be 2 or 3')
+
     return a
 
 
