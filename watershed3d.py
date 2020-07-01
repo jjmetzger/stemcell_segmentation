@@ -8,9 +8,7 @@ from scipy import ndimage as ndi
 from skimage.feature import peak_local_max
 import skimage
 from scipy.ndimage.filters import maximum_filter, gaussian_filter
-# from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 from skimage.morphology import ball, disk, binary_erosion, remove_small_objects, binary_dilation, binary_closing, dilation
-# from skimage.segmentation import random_walker
 import numpy as np
 import skimage.io as io
 import matplotlib.pylab as plt
@@ -21,12 +19,10 @@ from distutils.version import LooseVersion
 from matplotlib.colors import LogNorm
 from skimage.filters import threshold_otsu
 from ipywidgets import interact
-from numba import jit
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib
 
-# import seaborn as sns
 
 io.use_plugin('tifffile')
 # sys.path.append('/Users/jakob/Documents/RU/Code/segment')
@@ -679,7 +675,7 @@ class Ws3d(object):
         io.imsave(filename, to_write)
 
 
-    def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=True, z=None, seed=130):
+    def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=False, z=None, seed=123):
         """
         Select nuclei based on their size. Use quantiles or a hard cutoff. Cutoff overrides quantiles.
 
@@ -708,38 +704,25 @@ class Ws3d(object):
         good_nuclei.name = 'good_nuclei'
         # check whether already exists
         try:
-            self.df.drop('good_nuclei', axis=1, inplace=1)
-        except ValueError: # does not exist
+            self.df.drop('good_nuclei', axis=1, inplace=True)
+        except KeyError: # does not exist
             pass
 
         self.df = pd.concat([self.df, good_nuclei], axis=1)
         if plot:
+            # ax1 = self.df.hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
+            # for ax in ax1.ravel():
+            #     ax.set_xticks(ax.get_xticks()[::2])
+            # plt.suptitle('before selection of nuclei')
+            # #plt.tight_layout()
+            #
+            # ax1 = self.df[self.df.good_nuclei].hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
+            # for ax in ax1.ravel():
+            #     ax.set_xticks(ax.get_xticks()[::2])
+            # plt.suptitle('after selection of nuclei')
+            # #plt.tight_layout()
+            #
             # _, ax = plt.subplots()
-
-            # a_heights, a_bins = np.histogram(df_before.area, 50)
-            # b_heights, b_bins = np.histogram(self.df.area, bins=a_bins)
-            #
-            # width = (a_bins[1] - a_bins[0]) / 3
-            #
-            # ax.bar(a_bins[:-1], a_heights, width=width, facecolor='cornflowerblue')
-            # ax.bar(b_bins[:-1] + width, b_heights, width=width, facecolor='seagreen')
-
-            # df_before.hist(color='k', bins=50, alpha=0.6)
-            ax1 = self.df.hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
-            for ax in ax1.ravel():
-                ax.set_xticks(ax.get_xticks()[::2])
-            plt.suptitle('before selection of nuclei')
-            #plt.tight_layout()
-
-            ax1 = self.df[self.df.good_nuclei].hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
-            for ax in ax1.ravel():
-                ax.set_xticks(ax.get_xticks()[::2])
-            plt.suptitle('after selection of nuclei')
-            #plt.tight_layout()
-
-
-
-            _, ax = plt.subplots()
             w2 = self.ws.copy()  # note the copy here, otherwise next line also affects self.ws
             # w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0 # set to 0
             w2[~np.in1d(self.ws, np.array(self.df[self.df['good_nuclei']].index)).reshape(self.ws.shape)] = 0 # set to 0
@@ -747,6 +730,7 @@ class Ws3d(object):
             # all elements that are NOT in the good nuclei
 
             # show watershed after selections.
+            _,ax = plt.subplots()
             if self.image_dim == 3:
                 if z is None:
                     ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0,vmax=1024)
@@ -1205,8 +1189,9 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
             # now make 3d
             r = np.tile(r, (data.shape[0], 1, 1))
         else:
+            print(w.center[1],w.center[2])
             x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
-            r = np.sqrt((x - w.center[0]) ** 2 + (y - w.center[1]) ** 2)
+            r = np.sqrt((x - w.center[1]) ** 2 + (y - w.center[2]) ** 2)
             r = r.astype(np.int)
         
         tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
@@ -1564,7 +1549,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         cax = ax.scatter(x_all/w.xy_scale, y_all/w.xy_scale, c=c_all/c_all.max()*1000, s=markersize,
                          edgecolors='none', cmap=cmap, vmax=colormap_cutoff*1000)
     nice_spines(ax, grid=False)
-    ax.autoscale(tight=1)
+    # ax.autoscale(tight=1)
     ax.set_aspect('equal')
     if not axis:
         ax.axis('off')
@@ -1572,7 +1557,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         fig.colorbar(cax)
 
     if filename is not None:
-        fig.savefig(filename)
+        fig.savefig(filename, bbox_inches='tight')
 
 
 def radial_histogram_plot(w_list, channel_id, clip_quantile=100, bins=25, average_func=np.mean, only_selected_cells=False, colorbar=False, r_limit=None, axis=False, filename=None, cmap=plt.cm.viridis, figsize=(4,4)):
