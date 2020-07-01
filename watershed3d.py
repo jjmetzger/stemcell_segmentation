@@ -709,26 +709,12 @@ class Ws3d(object):
             pass
 
         self.df = pd.concat([self.df, good_nuclei], axis=1)
-        if plot:
-            # ax1 = self.df.hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
-            # for ax in ax1.ravel():
-            #     ax.set_xticks(ax.get_xticks()[::2])
-            # plt.suptitle('before selection of nuclei')
-            # #plt.tight_layout()
-            #
-            # ax1 = self.df[self.df.good_nuclei].hist(color='k', bins=50, alpha=0.6, xlabelsize=10)
-            # for ax in ax1.ravel():
-            #     ax.set_xticks(ax.get_xticks()[::2])
-            # plt.suptitle('after selection of nuclei')
-            # #plt.tight_layout()
-            #
-            # _, ax = plt.subplots()
-            w2 = self.ws.copy()  # note the copy here, otherwise next line also affects self.ws
-            # w2[~np.in1d(self.ws, np.array(self.df[self.good_nuclei].index)).reshape(self.ws.shape)] = 0 # set to 0
-            w2[~np.in1d(self.ws, np.array(self.df[self.df['good_nuclei']].index)).reshape(self.ws.shape)] = 0 # set to 0
-            self.mask_selected = w2 > 0
-            # all elements that are NOT in the good nuclei
+        w2 = self.ws.copy()  # note the copy here, otherwise next line also affects self.ws
+        w2[~np.in1d(self.ws, np.array(self.df[self.df['good_nuclei']].index)).reshape(self.ws.shape)] = 0 # set to 0
+        self.mask_selected = w2 > 0
+        # all elements that are NOT in the good nuclei
 
+        if plot:
             # show watershed after selections.
             _,ax = plt.subplots()
             if self.image_dim == 3:
@@ -1189,7 +1175,7 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
             # now make 3d
             r = np.tile(r, (data.shape[0], 1, 1))
         else:
-            print(w.center[1],w.center[2])
+            # print(w.center[1],w.center[2])
             x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
             r = np.sqrt((x - w.center[1]) ** 2 + (y - w.center[2]) ** 2)
             r = r.astype(np.int)
@@ -1223,17 +1209,17 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
         averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
         if binsize is not None:
             averaged_radial_profile_rm[i1] = running_mean(averaged_radial_profile[i1], binsize)
-        
+
     if binsize is None:
-        averaged_radial_profile = averaged_radial_profile.mean(axis=0)
+        averaged_radial_profile_mean = averaged_radial_profile.mean(axis=0)
         averaged_radial_profile_std = averaged_radial_profile.std(axis=0)
     else:
-        averaged_radial_profile = averaged_radial_profile_rm.mean(axis=0)
+        averaged_radial_profile_mean = averaged_radial_profile_rm.mean(axis=0)
         averaged_radial_profile_std = averaged_radial_profile_rm.std(axis=0)
 
     if plot:
         fig, ax = plt.subplots()
-        xx, yy = np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
+        xx, yy = np.arange(averaged_radial_profile_mean.shape[0]) / w.xy_scale, averaged_radial_profile_mean
         ax.plot(xx, yy)
         if len(w_list) > 1: # only makes sense to plot std when there are several colonies to average over
             ax.fill_between(xx, yy+averaged_radial_profile_std, yy-averaged_radial_profile_std, alpha=.2)
@@ -1252,8 +1238,8 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
     # save to file
     if filename is not None:
         np.savetxt(filename, np.vstack((np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile, averaged_radial_profile_std)).transpose(), delimiter=',')
-               
-    return np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile
+
+    return np.arange(averaged_radial_profile_mean.shape[0]) / w.xy_scale, averaged_radial_profile_mean, averaged_radial_profile_std, averaged_radial_profile
 
 
 def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True, binsize=None, filename=None,
@@ -1518,10 +1504,12 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
             indices = (0, 1)
 
         index = w._get_indices(only_selected_cells)
-        # x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[indices[0]]
-        # y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[indices[1]]
-        x = np.vstack(w.df.centroid[index].values.flat)[:, indices[0]] - w.center[1] # center always has z
-        y = np.vstack(w.df.centroid[index].values.flat)[:, indices[1]] - w.center[2]
+
+        # .flat seems to not be necessary in latest pandas
+        x = np.vstack(w.df.centroid[index].values)[:, indices[0]] - w.center[1] # center always has z
+        y = np.vstack(w.df.centroid[index].values)[:, indices[1]] - w.center[2]
+
+
         c = w.df[channel_id][index].values
 
         if r_limit is not None:
