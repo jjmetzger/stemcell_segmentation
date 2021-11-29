@@ -7,6 +7,7 @@ import matplotlib as mpl
 from scipy import ndimage as ndi
 from skimage.feature import peak_local_max
 import skimage
+import skimage.segmentation
 from scipy.ndimage.filters import maximum_filter, gaussian_filter
 from skimage.morphology import ball, disk, binary_erosion, remove_small_objects, binary_dilation, binary_closing, dilation
 import numpy as np
@@ -366,7 +367,7 @@ class Ws3d(object):
     #
     #             markers = ndi.label(self.peak_array)[0]
     #
-    #             self.ws = skimage.morphology.watershed(-self.image_stack[zi], markers, mask=self.mask[zi])
+    #             self.ws = skimage.segmentation.watershed(-self.image_stack[zi], markers, mask=self.mask[zi])
     #
     #             if remove_small_nuclei:
     #                 self.ws = remove_small_objects(self.ws, min_size=opensize_small_objects)
@@ -379,7 +380,7 @@ class Ws3d(object):
     #             if cyto_size is not None:
     #                 selem = disk(cyto_size)
     #                 extended_mask = binary_dilation(self.ws, selem=selem)
-    #                 self.labels_cyto = skimage.morphology.watershed(-self.image_stack[zi], markers, mask=extended_mask)
+    #                 self.labels_cyto = skimage.segmentation.watershed(-self.image_stack[zi], markers, mask=extended_mask)
     #                 self.labels_cyto[self.ws > 0] = 0
     #                 # self.perimeter_cyto = np.ma.masked_where(self.labels_cyto < 1, self.labels_cyto)
     #                 # border = binary_erosion(self.labels, selem=disk(8))
@@ -434,9 +435,16 @@ class Ws3d(object):
 
             if self.probability_map is None:
                 distance = ndi.distance_transform_edt(self.mask)
-                self.peak_array = peak_local_max(distance, min_distance=min_distance, indices=False)
+                # self.peak_array = peak_local_max(distance, min_distance=min_distance, indices=False)
+                # deprecated as of version skimage version 0.20, therefore as below
+                peak_idx = peak_local_max(distance, min_distance=min_distance)
+                self.peak_array = np.zeros_like(distance, dtype=bool)
+                self.peak_array[tuple(peak_idx.T)] = True
             else:
-                self.peak_array = peak_local_max(pm, min_distance=min_distance, indices=False)
+                # self.peak_array = peak_local_max(pm, min_distance=min_distance, indices=False)
+                peak_idx = peak_local_max(pm, min_distance=min_distance)
+                self.peak_array = np.zeros_like(pm, dtype=bool)
+                self.peak_array[tuple(peak_idx.T)] = True
 
             self.peak_array = relabel_peaks(self.peak_array.astype(np.int))
 
@@ -446,10 +454,9 @@ class Ws3d(object):
 
             # check for version because compactness is only available in watershed > 0.12
             if LooseVersion(skimage.__version__) > LooseVersion('0.13'):
-                self.ws = skimage.morphology.watershed(pm, markers, mask=self.mask, compactness=compactness)
-                # print('using compactness')
+                self.ws = skimage.segmentation.watershed(pm, markers, mask=self.mask, compactness=compactness)
             else:
-                self.ws = skimage.morphology.watershed(pm, markers, mask=self.mask)
+                self.ws = skimage.segmentation.watershed(pm, markers, mask=self.mask)
 
             if remove_small_nuclei:
                 self.ws = remove_small_objects(self.ws, min_size=opensize_small_objects)
@@ -467,7 +474,7 @@ class Ws3d(object):
 
                 # extended_mask = binary_dilation(self.mask, selem=selem)
                 # self.em = extended_mask
-                # self.labels_cyto = skimage.morphology.watershed(pm, ndi.label(self.peak_array)[0], mask=self.mask, compactness=compactness)
+                # self.labels_cyto = skimage.segmentation.watershed(pm, ndi.label(self.peak_array)[0], mask=self.mask, compactness=compactness)
                 self.labels_cyto = dilation(self.ws, selem=selem)
                 self.labels_cyto[self.ws > 0] = 0
                 # self.perimeter_cyto = np.ma.masked_where(self.labels_cyto < 1, self.labels_cyto)
