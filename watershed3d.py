@@ -178,6 +178,7 @@ class Ws3d(object):
         :param contrast_stretch: enhance contrast
         :param figsize: set the size of the figure when plotting a single z-slice, default is (10,10)
         :param cmap: colormap
+        :param return_fig: return the figure object
         :return:
         """
 
@@ -199,7 +200,7 @@ class Ws3d(object):
                 axes.imshow(self._contrast_stretch(image_to_plot), cmap=cmap)
             else:
                 axes.imshow(image_to_plot, interpolation='None', cmap=cmap)
-        else:  #3d
+        else:  # 3d
 
             if z is not None:
                 fig, axes = plt.subplots(figsize=figsize)
@@ -214,7 +215,7 @@ class Ws3d(object):
                 ncols = np.int(self.z_size // nrows + 1)
 
                 fig, axes = plt.subplots(nrows, ncols, figsize=(3 * ncols, 3 * nrows))
-                peak_counter = 1
+                # peak_counter = 1
                 for n in range(self.z_size):
                     i = n // ncols
                     j = n % ncols
@@ -394,9 +395,16 @@ class Ws3d(object):
 
         :param min_distance:
         :param sigma: default is (2, 6, 6) for 3d or (6, 6) for 2d
-        :param do_not_use_object_classifier:
-        :param z: if have 3d image, can give z or range of z to be segmentent as 2d images
+        :param do_not_use_object_classifier: Do not use Ilastik object classifier (not currently implemented, default is True)
+        :param opensize_small_objects: size of opening operation to remove small objects
+        :param remove_small_nuclei: remove small nuclei
+        :param cyto_size: cytoplasm size around nuclei in pixels
+        :param compactness: compactness parameters of scikit-image watershed
+        :param verbose: set to true if you want more information during run
         """
+
+        ###:param z: if have 3d image, can give z or range of z to be segmentent as 2d images
+
 
         self.cyto_size = cyto_size
 
@@ -537,14 +545,14 @@ class Ws3d(object):
 
             if ws.ndim == 3:
                 # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-                rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
+                rpd = [[i1.area, average_method(image_stack[i1.coords[:, 0], i1.coords[:, 1], i1.coords[:, 2]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean(axis=0)/np.array([zscale, xyscale, xyscale]), i1.label] for i1 in rp]
                 # rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.label] for i1 in rp_cyto]
-                rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1], i1.coords[:,2]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
+                rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:, 0], i1.coords[:, 1], i1.coords[:, 2]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
             elif ws.ndim == 2:
                 # rpd = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.coords.mean(axis=0)] for i1 in rp]
-                rpd = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean()/np.array([xyscale, xyscale]), i1.label] for i1 in rp]
+                rpd = [[i1.area, average_method(image_stack[i1.coords[:, 0], i1.coords[:, 1]]), i1.mean_intensity, i1.coords.mean(axis=0), i1.coords.mean()/np.array([xyscale, xyscale]), i1.label] for i1 in rp]
                 # rpd_cyto = [[i1.area, i1.mean_intensity * i1.area, i1.mean_intensity, i1.label] for i1 in rp_cyto]
-                rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:,0], i1.coords[:,1]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
+                rpd_cyto = [[i1.area, average_method(image_stack[i1.coords[:, 0], i1.coords[:, 1]]), i1.mean_intensity, i1.label] for i1 in rp_cyto]
             else:
                 raise RuntimeError('image dimensions must be 2 or 3')
 
@@ -561,7 +569,7 @@ class Ws3d(object):
             # need to remove those without cytoplasm
 
             # return pd.DataFrame(pd.concat([df1, df2], axis=1), index=indices, columns=columns)
-            return pd.merge(df1,df2, on='label')
+            return pd.merge(df1, df2, on='label')
             # return pd.DataFrame(rpd, index=indices, columns=columns, axis=1)
 
     def show_segmentation(self, z=None, contrast_stretch=True, figsize=None, seed=130, show_labels=False, title=None, plot_cyto=False, ms=3):
@@ -572,6 +580,10 @@ class Ws3d(object):
         :param contrast_stretch: enhance contrast for better visibility
         :param figsize: figure size
         :param seed:  seed for the random color map
+        :param show_labels: show peak labels on plot
+        :param title: set plot title
+        :param plot_cyto: plot cytoplasma
+        :param ms: marker size
         """
 
         if self.peaks is None:
@@ -635,25 +647,24 @@ class Ws3d(object):
 
             else:
                 if plot_cyto and self.cyto_size is not None:
-                    ax[1].imshow(np.ma.masked_equal(self.labels_cyto[z], 0), cmap=random_cmap(seed=123, return_darker=True)[1], vmin=0,vmax=1024)
+                    ax[1].imshow(np.ma.masked_equal(self.labels_cyto[z], 0), cmap=random_cmap(seed=123, return_darker=True)[1], vmin=0, vmax=1024)
                     ax[1].imshow(np.ma.masked_equal(self.ws[z], 0), cmap=random_cmap(seed=123), vmin=0,vmax=1024)
                     # ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=1))
                     # ax[1].imshow(self.labels_cyto[z], cmap=self.myrandom_cmap(seed=seed))
                 else:
-                    ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=True)[0], vmin=0,vmax=1024)
+                    ax[1].imshow(self.ws[z], cmap=self.myrandom_cmap(seed=seed, return_darker=True)[0], vmin=0, vmax=1024)
 
             ax[1].plot(self.peaks[:, 2], self.peaks[:, 1], 'xr', ms=ms)
             ax[1].set_xlim(self.peaks[:, 2].min() - 20, self.peaks[:, 2].max() + 20)
             ax[1].set_ylim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
 
         else:
-            ax[1].imshow(self.ws, cmap=self.myrandom_cmap(seed=seed), vmin=0,vmax=1024)
+            ax[1].imshow(self.ws, cmap=self.myrandom_cmap(seed=seed), vmin=0, vmax=1024)
             ax[1].plot(self.peaks[:, 1], self.peaks[:, 0], 'xr', ms=ms)
             ax[1].set_xlim(self.peaks[:, 1].min() - 20, self.peaks[:, 1].max() + 20)
             ax[1].set_ylim(self.peaks[:, 0].min() - 20, self.peaks[:, 0].max() + 20)
 
         # return fig
-
 
     def write_image_with_seeds(self, filename='image_with_seeds.tif'):
         """
@@ -676,8 +687,7 @@ class Ws3d(object):
         to_write[dilated_peak_array] = np.iinfo(self.image_stack.dtype).max
         io.imsave(filename, to_write)
 
-
-    def select_nuclei(self, quantiles=[0.1, 0.9], cutoff=None, plot=False, z=None, seed=123):
+    def select_nuclei(self, quantiles=None, cutoff=None, plot=False, z=None, seed=123):
         """
         Select nuclei based on their size. Use quantiles or a hard cutoff. Cutoff overrides quantiles.
 
@@ -688,6 +698,10 @@ class Ws3d(object):
 
         assert self.df is not None
         # df_before = self.df
+
+        # quantiles = quantiles if quantiles else [0.1, 0.9]  # same as below but more cryptic for the casual reader
+        if quantiles is None:
+            quantiles = [0.1, 0.9]  # set here in order to not have mutable default arguments
 
         if cutoff is not None:
             if len(cutoff) != 2:
@@ -707,7 +721,7 @@ class Ws3d(object):
         # check whether already exists
         try:
             self.df.drop('good_nuclei', axis=1, inplace=True)
-        except KeyError: # does not exist
+        except KeyError:  # does not exist
             pass
 
         self.df = pd.concat([self.df, good_nuclei], axis=1)
@@ -718,14 +732,14 @@ class Ws3d(object):
 
         if plot:
             # show watershed after selections.
-            _,ax = plt.subplots()
+            _, ax = plt.subplots()
             if self.image_dim == 3:
                 if z is None:
-                    ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0,vmax=1024)
+                    ax.imshow(w2.max(axis=0), cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0, vmax=1024)
                 else:
-                    ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0,vmax=1024)
+                    ax.imshow(w2[z], cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0, vmax=1024)
             else:
-                ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0,vmax=1024)
+                ax.imshow(w2, cmap=self.myrandom_cmap(seed=seed), origin='lower', vmin=0, vmax=1024)
             ax.set_title('after selection of good nuclei')
 
     def apply_to_channels(self, filename, channel_id, remove_background=False, average_method=np.median):
@@ -786,8 +800,8 @@ class Ws3d(object):
 #         middle = int(np.round(self.image_stack.shape[0] /2))
 #         center_xy = np.array(center_of_mass(np.abs(self.image_stack[middle])))
 #         self.center = np.array([0., center_xy[0], center_xy[1]])
-        
-        
+
+
 
     def _get_indices(self, only_selected_cells):
         if only_selected_cells:
@@ -1002,7 +1016,7 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
             x, y = np.indices(data.shape)  # note changed NON-inversion of x and y
             r = np.sqrt((x - w.center[1]) ** 2 + (y - w.center[2]) ** 2)
             r = r.astype(np.int)
-        
+
         tbin = np.bincount(r.ravel(), data.ravel())  # bincount makes +1 counts
 
         if mask is None:
@@ -1014,7 +1028,7 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
             # counted, because they were set to zero above and should not contribute to the average.
         radialprofile = tbin / nr
         if np.isnan(radialprofile).any():
-            #print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
+            # print("WARNING: there were empty bins, i.e. at some radii there seem to be no cells.")
             radialprofile[np.isnan(radialprofile)] = 0.  # set these to 0
 
         radial_profile_all.append(radialprofile)
@@ -1027,7 +1041,7 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
     if binsize is not None:
         running_mean_vec_length = running_mean(averaged_radial_profile[0], binsize).shape[0]
         averaged_radial_profile_rm = np.zeros((len(radial_profile_all), running_mean_vec_length))
-    
+
     for i1, rp in enumerate(radial_profile_all):
         averaged_radial_profile[i1] = np.pad(rp, (0, maxlength - len(rp)), 'constant')
         if binsize is not None:
@@ -1048,8 +1062,8 @@ def radial_intensity(w_list, channel_id, only_selected_nuclei=False, plot=True, 
         if len(w_list) > 1: # only makes sense to plot std when there are several colonies to average over
             ax.fill_between(xx, yy+averaged_radial_profile_std, yy-averaged_radial_profile_std, alpha=.2)
 
-        #ax.errorbar(np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile, yerr=averaged_radial_profile_std)
-        
+        # ax.errorbar(np.arange(averaged_radial_profile.shape[0]) / w.xy_scale, averaged_radial_profile, yerr=averaged_radial_profile_std)
+
         ax.set_ylim([0., ax.get_ylim()[1]])
         if xcutoff is not None:
             ax.set_xlim(0, xcutoff)
@@ -1101,7 +1115,7 @@ def radial_intensity_z(w_list, channel_id, only_selected_nuclei=False, plot=True
             mask = w.mask
         data[~mask] = 0  # set all False values to 0
 
-        #normalize data
+        # normalize data
         if normalize:
             data = data/w.image_stack
             data[np.isinf(data)] = 0. # set division by zero to 0
@@ -1293,7 +1307,7 @@ def radial_profile_per_cell(w_list, channel_id, nbins=30, plot=True, only_select
     # make sure to replace nans by 0.
     return_vec = n/n2
     return_vec[np.isnan(return_vec)] = 0.
-    
+
     return xn[:-1] - xn[0], return_vec
 
 
@@ -1370,7 +1384,7 @@ def dot_plot(w_list, channel_id, color_range=None, colormap_cutoff=0.5, only_sel
         fig.savefig(filename, bbox_inches='tight')
 
 
-def radial_histogram_plot(w_list, channel_id, clip_quantile=100, bins=25, average_func=np.mean, only_selected_cells=False, r_limit=None, filename=None, cmap=plt.cm.viridis, figsize=(4,4)):
+def radial_histogram_plot(w_list, channel_id, clip_quantile=100, bins=25, average_func=np.mean, only_selected_cells=False, r_limit=None, filename=None, cmap=plt.cm.viridis, figsize=(4, 4)):
     """
     Radial histogram weighted by expression
 
@@ -1641,7 +1655,7 @@ def histogram_pixel(w_list, channel_id1, downsample=1, only_selected_cells=False
         ch1_all = np.hstack((ch1_all, to_add))
 
     fig, ax = plt.subplots(figsize=(6,4))
-    ax.hist(ch1_all, bins=bins);
+    ax.hist(ch1_all, bins=bins)
     # d_masked = np.ma.masked_where(d == 0, d)  # mask zero bins in plot
     # ax.imshow(d_masked.T, extent=[x[0], x[-1], y[0], y[-1]], cmap='magma_r', origin='low')
 
@@ -1800,7 +1814,7 @@ def radial_z_height(w_list, z_scale=None, binsize=20, plot=True, fontsize=16, fi
     # save to file
     if filename is not None:
         np.savetxt(filename, np.vstack((rvec, averaged_radial_profile)).transpose(), delimiter=',')
-        
+
     return rvec, averaged_radial_profile
 
 
@@ -2127,11 +2141,10 @@ def scatter3d(w, channel, cut=0, xyz_scale=None, only_selected_cells=False, vmax
     ax.grid('on')
     ax.set_axis_bgcolor('white')
 
-
     if cut:
         x = np.array([0, 100, 100, 0]) + pts[:, 1].mean()
         y = np.array([0, 0, 0, 0]) + pts[:, 2].mean()
-        z = [110, 110, 0, 0] - 2 * pts[:, 0].mean() - 10
+        z = np.array([110, 110, 0, 0]) - 2 * pts[:, 0].mean() - 10
         verts = [list(zip(x, y, z))]
         poly = Poly3DCollection(verts)
         ax.add_collection3d(poly, zs='z')
